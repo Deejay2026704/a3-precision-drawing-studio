@@ -47,9 +47,15 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - name: Build NSIS installers (x64, arm64)
-        run: npm run dist:win
+        shell: pwsh
+        run: |
+          if (-not $env:WIN_CSC_LINK) { Remove-Item Env:WIN_CSC_LINK, Env:WIN_CSC_KEY_PASSWORD -ErrorAction SilentlyContinue }  # unsigned build when no secret
+          npm run dist:win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Optional code signing: add these repository secrets to sign (see README › Code signing).
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
       - name: Install silently (x64)
         shell: pwsh
         run: |
@@ -63,6 +69,21 @@ jobs:
         run: |
           npm install --no-save playwright@${{ env.PLAYWRIGHT_VERSION }}
           node tests-e2e/packaged-smoke.mjs "C:\A3Test\A3 Precision Drawing Studio.exe"
+      - name: Build a NEWER version (99.0.0) for the auto-update test
+        shell: pwsh
+        run: |
+          if (-not $env:WIN_CSC_LINK) { Remove-Item Env:WIN_CSC_LINK, Env:WIN_CSC_KEY_PASSWORD -ErrorAction SilentlyContinue }  # unsigned build when no secret
+          npx electron-builder --config electron-builder.config.cjs --publish never --win --x64 -c.win.target=nsis -c.directories.output=release-update -c.extraMetadata.version=99.0.0
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Auto-update the INSTALLED app from a local update server
+        run: |
+          Get-ChildItem release-update | Format-Table Name, Length
+          Get-Content release-update/latest.yml
+          node tests-e2e/update-e2e.mjs "C:\A3Test\A3 Precision Drawing Studio.exe" release-update install 99.0.0
+        shell: pwsh
       - name: Uninstall silently
         shell: pwsh
         run: |
@@ -77,6 +98,7 @@ jobs:
           path: |
             release/*.exe
             release/*.blockmap
+            release/latest.yml
             test-results/*.png
           if-no-files-found: warn
 
@@ -91,9 +113,19 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - name: Build DMG + ZIP (Apple Silicon and Intel)
-        run: npm run dist:mac
+        run: |
+          # Blank secrets → unset, so an unsigned (ad-hoc) build is made.
+          [ -z "$CSC_LINK" ] && unset CSC_LINK CSC_KEY_PASSWORD
+          [ -z "$APPLE_ID" ] && unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+          npm run dist:mac
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Optional Developer ID signing + notarisation (see README › Code signing).
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - name: Verify disk images and install from the DMG
         run: |
           ls -la release
@@ -110,6 +142,15 @@ jobs:
         run: |
           npm install --no-save playwright@${{ env.PLAYWRIGHT_VERSION }}
           node tests-e2e/packaged-smoke.mjs "$RUNNER_TEMP/Applications/A3 Precision Drawing Studio.app/Contents/MacOS/A3 Precision Drawing Studio"
+      - name: Build a NEWER version (99.0.0) for the update test
+        run: |
+          ARCH=$(uname -m); [ "$ARCH" = "x86_64" ] && ARCH=x64
+          npx electron-builder --config electron-builder.config.cjs --publish never --mac --$ARCH -c.mac.target=zip -c.directories.output=release-update -c.extraMetadata.version=99.0.0
+          ls -la release-update; cat release-update/latest-mac.yml
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Update check of the INSTALLED app (unsigned → notify + release page)
+        run: node tests-e2e/update-e2e.mjs "$RUNNER_TEMP/Applications/A3 Precision Drawing Studio.app/Contents/MacOS/A3 Precision Drawing Studio" release-update notify 99.0.0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -118,6 +159,7 @@ jobs:
             release/*.dmg
             release/*.zip
             release/*.blockmap
+            release/latest-mac.yml
             test-results/*.png
           if-no-files-found: warn
 
@@ -133,7 +175,12 @@ jobs:
         with: { path: artifacts }
       - uses: softprops/action-gh-release@v2
         with:
+          # latest*.yml + .blockmap are the auto-update feed read by installed apps.
           files: |
             artifacts/windows-installers/*.exe
+            artifacts/windows-installers/*.blockmap
+            artifacts/windows-installers/latest.yml
             artifacts/macos-installers/*.dmg
             artifacts/macos-installers/*.zip
+            artifacts/macos-installers/*.blockmap
+            artifacts/macos-installers/latest-mac.yml
