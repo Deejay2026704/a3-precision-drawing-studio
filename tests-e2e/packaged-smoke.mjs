@@ -82,14 +82,29 @@ async function waitForAllProcessesToExit() {
 }
 
 /** Launch, retrying once if the new process closes immediately. */
+const mainLog = () => {
+  const f = path.join(userData, 'logs', 'main.log');
+  return existsSync(f) ? readFileSync(f, 'utf8') : '(no main.log)';
+};
+
 async function relaunch() {
   try {
     return await launch();
   } catch (e) {
-    console.log(`  note: first relaunch failed (${String(e).split('\n')[0]}), retrying`);
+    console.log(`  note: relaunch failed (${String(e).split('\n')[0]})`);
+    console.log('  ---- app log (main.log) ----\n' + mainLog().split('\n').slice(-25).map((l) => '    ' + l).join('\n'));
+    console.log('  ---- profile folder ----\n    ' + readdirSync(userData).join(', '));
     await waitForAllProcessesToExit();
     await sleep(2000);
-    return launch();
+    try {
+      return await launch();
+    } catch (e2) {
+      console.log('  note: second attempt failed too; diagnostic retry with the single-instance lock disabled');
+      env.A3_ALLOW_MULTIPLE = '1';
+      const r = await launch();
+      check('DIAGNOSTIC: relaunch works without the single-instance lock (lock is the cause)', false, 'see log above');
+      return r;
+    }
   }
 }
 

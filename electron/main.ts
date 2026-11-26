@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { writeFileAtomic } from './atomicWrite';
 import { AutosaveStore, sessionId } from './autosaveStore';
-import { existsSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 
 const APP_TITLE = 'A3 Precision Drawing Studio';
 const FILE_FILTERS = [
@@ -14,12 +14,29 @@ const FILE_FILTERS = [
 let mainWindow: BrowserWindow | null = null;
 let documentDirty = false;
 
-/** Lifecycle diagnostics on stderr (visible when launched from a terminal or a test harness). */
-const log = (msg: string) => process.stderr.write(`[a3] ${msg}\n`);
+/**
+ * Lifecycle diagnostics: stderr (terminal / test harness) and, synchronously, a small log
+ * file in the app data folder (logs/main.log, reset above 512 KB) so nothing is lost when
+ * the process exits early.
+ */
+function log(msg: string): void {
+  const line = `${new Date().toISOString()} [a3 pid ${process.pid}] ${msg}\n`;
+  process.stderr.write(line);
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs');
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'main.log');
+    if (existsSync(file) && statSync(file).size > 512 * 1024) writeFileSync(file, '');
+    appendFileSync(file, line);
+  } catch {
+    /* logging must never break the app */
+  }
+}
 
 // Tests (and portable setups) can redirect all app data, including autosave, away from the real profile.
 if (process.env.A3_USER_DATA) app.setPath('userData', process.env.A3_USER_DATA);
 
+log(`starting – argv: ${JSON.stringify(process.argv.slice(1))}`);
 const SESSION = sessionId(process.pid, Date.now());
 let autosave: AutosaveStore | null = null;
 const autosaveStore = () => (autosave ??= new AutosaveStore(path.join(app.getPath('userData'), 'autosave'), SESSION));
