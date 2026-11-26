@@ -44,7 +44,7 @@ async function launch(fileArg) {
   const app = await electron.launch({
     executablePath: electronBinary,
     args: ['.', ...extraArgs, ...(fileArg ? [fileArg] : [])],
-    env: { ...process.env, VITE_DEV_SERVER_URL: url, A3_USER_DATA: userData, A3_AUTOSAVE_INTERVAL_MS: '1000' },
+    env: { ...process.env, VITE_DEV_SERVER_URL: url, A3_USER_DATA: userData, A3_AUTOSAVE_INTERVAL_MS: '1000', A3_HEARTBEAT_STALE_MS: '4000' },
   });
   const win = await app.firstWindow();
   win.setDefaultTimeout(8000);
@@ -140,7 +140,7 @@ try {
   console.log('\nC. Crash recovery');
   const projBytes = readFileSync(proj, 'utf8');
   app.process().kill('SIGKILL');
-  await sleep(2000);
+  await sleep(5000); // past the 4 s heartbeat staleness
   cur = await launch();
   ({ app, win, errors, setPaths } = cur);
   await win.waitForSelector('[data-testid=dialog-recovery]');

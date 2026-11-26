@@ -72,6 +72,30 @@ describe('autosave store (separate recovery folder)', () => {
     expect((await s.orphans()).map((x) => x.id)).toEqual(['session-333-6']);
   });
 
+  it('a live-looking PID with a stale heartbeat is treated as crashed (Windows handles, PID reuse)', async () => {
+    const dir = mk();
+    let t = 100_000;
+    const other = new AutosaveStore(dir, sessionId(555, 1), () => true, 30_000, () => t);
+    await other.write('work in progress');
+    await other.heartbeat();
+    const me = new AutosaveStore(dir, sessionId(666, 2), () => true, 30_000, () => t);
+    expect(await me.orphans()).toEqual([]); // fresh heartbeat: still running
+    t += 31_000; // no heartbeat for 31 s
+    utimesSync(path.join(dir, 'session-555-1.alive'), 100, 100);
+    expect((await me.orphans()).map((o) => o.id)).toEqual(['session-555-1']);
+    await me.remove('session-555-1');
+    expect(readdirSync(dir).filter((f) => f.startsWith('session-555'))).toEqual([]);
+  });
+
+  it('dispose removes both the backup and the heartbeat', async () => {
+    const dir = mk();
+    const s = new AutosaveStore(dir, sessionId(7, 7));
+    await s.write('x');
+    await s.heartbeat();
+    await s.dispose();
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
   it('a missing folder means no orphans; ids cannot escape the folder', async () => {
     const s = new AutosaveStore(path.join(mk(), 'nope'), sessionId(1, 1));
     expect(await s.orphans()).toEqual([]);

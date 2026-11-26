@@ -5,8 +5,9 @@ import { writeFileAtomic } from './atomicWrite';
 /**
  * Crash-recovery storage, kept SEPARATE from the user's project files:
  * <userData>/autosave/session-<pid>-<startMs>.json – one file per running app session.
- * A file whose process is no longer running is an "orphan": the app crashed or was
- * killed before the drawing was saved, and it is offered for recovery at the next start.
+ * A running session also keeps <id>.alive fresh (heartbeat). A backup whose process is gone,
+ * or whose heartbeat is stale, is an "orphan": the app crashed or was killed before the
+ * drawing was saved, and it is offered for recovery at the next start.
  */
 export interface AutosaveEntry {
   readonly id: string;
@@ -28,12 +29,41 @@ function isAlive(pid: number): boolean {
   }
 }
 
+/** A session whose heartbeat is older than this is treated as dead even if its PID looks alive. */
+export const DEFAULT_STALE_MS = 30_000;
+
 export class AutosaveStore {
   constructor(
     private readonly dir: string,
     private readonly ownId: string,
     private readonly alive: (pid: number) => boolean = isAlive,
+    private readonly staleMs: number = DEFAULT_STALE_MS,
+    private readonly now: () => number = Date.now,
   ) {}
+
+  private heartbeatFile(id: string): string {
+    return path.join(this.dir, `${id}.alive`);
+  }
+
+  /**
+   * Mark this session as running. Called periodically by the main process. PIDs alone are not
+   * reliable (Windows reports a terminated process as existing while any handle to it is open,
+   * and PIDs are reused), so a backup is only "owned" while its heartbeat is fresh.
+   */
+  async heartbeat(): Promise<void> {
+    await fs.mkdir(this.dir, { recursive: true });
+    await fs.writeFile(this.heartbeatFile(this.ownId), String(this.now()));
+  }
+
+  private async isRunning(id: string, pid: number): Promise<boolean> {
+    if (!this.alive(pid)) return false;
+    try {
+      const st = await fs.stat(this.heartbeatFile(id));
+      return this.now() - st.mtimeMs <= this.staleMs;
+    } catch {
+      return true; // no heartbeat file (older version): trust the PID check
+    }
+  }
 
   private file(id: string): string {
     if (!NAME.test(`${id}.json`)) throw new Error('Invalid autosave id');
@@ -51,6 +81,12 @@ export class AutosaveStore {
     await fs.rm(this.file(this.ownId), { force: true });
   }
 
+  /** On a normal quit: no backup and no heartbeat left behind. */
+  async dispose(): Promise<void> {
+    await fs.rm(this.file(this.ownId), { force: true });
+    await fs.rm(this.heartbeatFile(this.ownId), { force: true });
+  }
+
   /** Recovery copies left by sessions that are no longer running, newest first. */
   async orphans(): Promise<AutosaveEntry[]> {
     let names: string[];
@@ -65,7 +101,7 @@ export class AutosaveStore {
       if (!m) continue;
       const id = n.slice(0, -5);
       const pid = Number(m[1]);
-      if (id === this.ownId || this.alive(pid)) continue;
+      if (id === this.ownId || (await this.isRunning(id, pid))) continue;
       const st = await fs.stat(path.join(this.dir, n));
       out.push({ id, pid, modifiedMs: st.mtimeMs, sizeBytes: st.size });
     }
@@ -80,5 +116,6 @@ export class AutosaveStore {
   async remove(id: string): Promise<void> {
     if (id === this.ownId) return;
     await fs.rm(this.file(id), { force: true });
+    await fs.rm(this.heartbeatFile(id), { force: true });
   }
 }

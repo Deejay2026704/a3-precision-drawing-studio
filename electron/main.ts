@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { writeFileAtomic } from './atomicWrite';
-import { AutosaveStore, sessionId } from './autosaveStore';
+import { AutosaveStore, DEFAULT_STALE_MS, sessionId } from './autosaveStore';
 import { appendFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 
 const APP_TITLE = 'A3 Precision Drawing Studio';
@@ -39,7 +39,9 @@ if (process.env.A3_USER_DATA) app.setPath('userData', process.env.A3_USER_DATA);
 log(`starting – argv: ${JSON.stringify(process.argv.slice(1))}`);
 const SESSION = sessionId(process.pid, Date.now());
 let autosave: AutosaveStore | null = null;
-const autosaveStore = () => (autosave ??= new AutosaveStore(path.join(app.getPath('userData'), 'autosave'), SESSION));
+const STALE_MS = Number(process.env.A3_HEARTBEAT_STALE_MS) || DEFAULT_STALE_MS; // test hook
+const autosaveStore = () =>
+  (autosave ??= new AutosaveStore(path.join(app.getPath('userData'), 'autosave'), SESSION, undefined, STALE_MS));
 
 /** A .a3d file the OS asked us to open (double-click / "Open with" / macOS open-file). */
 let pendingOpenPath: string | null = null;
@@ -52,7 +54,8 @@ function requestOpen(filePath: string) {
 }
 
 // One window: a second launch (e.g. double-clicking another drawing) hands its file to this instance.
-if (!process.env.A3_ALLOW_MULTIPLE && !app.requestSingleInstanceLock()) {
+const gotLock = Boolean(process.env.A3_ALLOW_MULTIPLE) || app.requestSingleInstanceLock();
+if (!gotLock) {
   log('another instance holds the single-instance lock – handing over and quitting');
   app.quit();
 } else {
@@ -193,7 +196,7 @@ ipcMain.handle('autosave:remove', (_e, id: string) => autosaveStore().remove(id)
 // A normal quit (the user saved, or chose to discard) leaves no recovery copy behind.
 // A crash or forced kill skips this, so the copy survives for recovery.
 app.on('will-quit', () => {
-  rmSync(path.join(app.getPath('userData'), 'autosave', `${SESSION}.json`), { force: true });
+  for (const ext of ['json', 'alive']) rmSync(path.join(app.getPath('userData'), 'autosave', `${SESSION}.${ext}`), { force: true });
 });
 
 ipcMain.on('doc:dirty', (_e, dirty: boolean) => {
@@ -207,7 +210,11 @@ app.on('quit', (_e, code) => log(`quit (exit code ${code})`));
 process.on('uncaughtException', (err) => log(`uncaught exception: ${err.stack ?? err}`));
 
 app.whenReady().then(() => {
+  if (!gotLock) return; // handing over to the running instance: never open a second window
   log(`ready – version ${app.getVersion()}, userData ${app.getPath('userData')}`);
+  const beat = () => void autosaveStore().heartbeat().catch((e: Error) => log(`heartbeat failed: ${e.message}`));
+  beat();
+  setInterval(beat, Math.max(1000, Math.min(10_000, STALE_MS / 3))).unref();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

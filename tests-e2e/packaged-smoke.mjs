@@ -30,7 +30,7 @@ const OUT = process.env.E2E_OUT ?? 'test-results';
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'a3-packaged-'));
 const userData = path.join(tmp, 'profile');
 const autosaveDir = path.join(userData, 'autosave');
-const env = { ...process.env, A3_USER_DATA: userData, A3_AUTOSAVE_INTERVAL_MS: '1000' };
+const env = { ...process.env, A3_USER_DATA: userData, A3_AUTOSAVE_INTERVAL_MS: '1000', A3_HEARTBEAT_STALE_MS: '4000' };
 delete env.VITE_DEV_SERVER_URL;
 
 let failures = 0;
@@ -72,13 +72,23 @@ async function launch() {
  *  processes alive for a few seconds; relaunching earlier hits the single-instance lock). */
 async function waitForAllProcessesToExit() {
   if (process.platform !== 'win32') return sleep(2500);
-  const image = path.basename(exe);
+  const image = path.basename(exe).toLowerCase();
   for (let i = 0; i < 60; i++) {
-    const out = execFileSync('tasklist', ['/FI', `IMAGENAME eq ${image}`, '/NH'], { encoding: 'utf8' });
-    if (!out.includes(image)) return;
+    // CSV output: the table format truncates long image names.
+    const out = execFileSync('tasklist', ['/FO', 'CSV', '/NH'], { encoding: 'utf8' }).toLowerCase();
+    if (!out.includes(`"${image}"`)) return;
     await sleep(500);
   }
   console.log('  note: app processes still running after 30 s');
+}
+
+/** Simulate a crash: kill the whole process tree, like Task Manager's "End task". */
+async function crash(app) {
+  const pid = app.process().pid;
+  if (process.platform === 'win32') execFileSync('taskkill', ['/F', '/T', '/PID', String(pid)], { stdio: 'ignore' });
+  else app.process().kill('SIGKILL');
+  await waitForAllProcessesToExit();
+  await sleep(5000); // longer than the 4 s heartbeat staleness used in this test
 }
 
 /** Launch, retrying once if the new process closes immediately. */
@@ -150,8 +160,7 @@ try {
   check('status bar shows the autosave', /Autosaved/.test((await win.textContent('[data-testid=status-autosave]')) ?? ''));
 
   // ------------------------------------------------------------------ crash
-  app.process().kill('SIGKILL');
-  await waitForAllProcessesToExit();
+  await crash(app);
   check('after a crash the recovery copy is still there', listAutosaves().length === 1);
 
   // ------------------------------------------------------------------ restart → recover
@@ -194,7 +203,11 @@ try {
   console.log(`  FAIL  script error: ${err && err.stack ? err.stack.split('\n').slice(0, 8).join(' | ') : err}`);
 } finally {
   if (current) await current.app.close().catch(() => {});
-  rmSync(tmp, { recursive: true, force: true });
+  try {
+    rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+  } catch (e) {
+    console.log(`  note: could not remove ${tmp}: ${e.message}`);
+  }
 }
 console.log(`\nPackaged smoke result: ${passes} passed, ${failures} failed`);
 process.exit(failures ? 1 : 0);
