@@ -15,6 +15,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
+// Must be REMOVED, not blanked: on Windows Electron treats an empty ELECTRON_RUN_AS_NODE as set.
+delete process.env.ELECTRON_RUN_AS_NODE;
 const { _electron: electron } = require('playwright');
 
 const exe = process.argv[2];
@@ -27,7 +29,7 @@ const OUT = process.env.E2E_OUT ?? 'test-results';
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'a3-packaged-'));
 const userData = path.join(tmp, 'profile');
 const autosaveDir = path.join(userData, 'autosave');
-const env = { ...process.env, A3_USER_DATA: userData, A3_AUTOSAVE_INTERVAL_MS: '1000', ELECTRON_RUN_AS_NODE: '' };
+const env = { ...process.env, A3_USER_DATA: userData, A3_AUTOSAVE_INTERVAL_MS: '1000' };
 delete env.VITE_DEV_SERVER_URL;
 
 let failures = 0;

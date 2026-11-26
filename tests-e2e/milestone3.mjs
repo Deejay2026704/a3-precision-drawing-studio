@@ -9,6 +9,8 @@ import { createServer } from 'vite';
 import { buildElectron } from '../scripts/electron-build.mjs';
 
 const require = createRequire(import.meta.url);
+// Must be REMOVED, not blanked: on Windows Electron treats an empty ELECTRON_RUN_AS_NODE as set.
+delete process.env.ELECTRON_RUN_AS_NODE;
 const { _electron: electron } = require('playwright');
 const electronBinary = require('electron');
 const OUT = process.env.E2E_OUT ?? 'test-results';
@@ -35,7 +37,7 @@ const canon = (v) => JSON.stringify(v, (_k, x) => (x && typeof x === 'object' &&
 await buildElectron({ dev: true });
 const server = await createServer({ configFile: 'vite.config.ts', logLevel: 'error' });
 await server.listen();
-const app = await electron.launch({ executablePath: electronBinary, args: ['.', ...extraArgs], env: { ...process.env, VITE_DEV_SERVER_URL: server.resolvedUrls.local[0], ELECTRON_RUN_AS_NODE: '' } });
+const app = await electron.launch({ executablePath: electronBinary, args: ['.', ...extraArgs], env: { ...process.env, VITE_DEV_SERVER_URL: server.resolvedUrls.local[0] } });
 
 try {
   const win = await app.firstWindow();

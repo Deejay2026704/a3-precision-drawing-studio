@@ -10,6 +10,8 @@ import { createServer } from 'vite';
 import { buildElectron } from '../scripts/electron-build.mjs';
 
 const require = createRequire(import.meta.url);
+// Must be REMOVED, not blanked: on Windows Electron treats an empty ELECTRON_RUN_AS_NODE as set.
+delete process.env.ELECTRON_RUN_AS_NODE;
 const { _electron: electron } = require('playwright');
 const electronBinary = require('electron');
 const OUT = process.env.E2E_OUT ?? 'test-results';
@@ -42,7 +44,7 @@ async function launch(fileArg) {
   const app = await electron.launch({
     executablePath: electronBinary,
     args: ['.', ...extraArgs, ...(fileArg ? [fileArg] : [])],
-    env: { ...process.env, VITE_DEV_SERVER_URL: url, ELECTRON_RUN_AS_NODE: '', A3_USER_DATA: userData, A3_AUTOSAVE_INTERVAL_MS: '1000' },
+    env: { ...process.env, VITE_DEV_SERVER_URL: url, A3_USER_DATA: userData, A3_AUTOSAVE_INTERVAL_MS: '1000' },
   });
   const win = await app.firstWindow();
   win.setDefaultTimeout(8000);
