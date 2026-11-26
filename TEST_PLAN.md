@@ -1,4 +1,4 @@
-# Test Plan: Milestones 1, 2 and 3
+# Test Plan: Milestones 1–4
 
 There are three levels of testing:
 
@@ -55,6 +55,16 @@ Last full result: **24 files, 243 tests, all passing**.
 | Export | `tests/exportSvg.test.ts` | **hidden layers excluded**, locked layers included with layer colour, A3 size in mm and scale/Y-flip, dimension text, no constraint markers, all-hidden ⇒ empty |
 | Atomic save | `tests/atomicWrite.test.ts` | create/replace; a failed save leaves the original untouched with no temp file; missing folder |
 | Tools | `tests/toolSession.test.ts` | coincident and fixed-position point tools; modify tools refuse non-editable objects |
+
+### Milestone 4 unit tests (added)
+
+Last full result: **26 files, 262 tests, all passing**.
+
+| Area | File | What is verified |
+| --- | --- | --- |
+| PDF | `tests/exportPdf.test.ts` | A3 MediaBox; every xref offset and the stream length; true-scale coordinates at 1:2; hidden layers excluded (objects, dimensions, layer); visible layers as OCGs with safe Unicode names; Helvetica/WinAnsi (⌀→Ø); "By layer" colour; Bézier circle error < 1e-4 mm; deterministic; **poppler** reads page size, title and text |
+| Autosave | `tests/autosave.test.ts` | record round trip; damaged/foreign/incomplete records and invalid projects rejected; scheduling rule (disabled, clean, unchanged, mid-drag, too soon); store writes/clears only its own file, never touches other files; orphans = dead sessions only, newest first; path-escape refused; recovered drawings open modified and become clean only on save |
+| SVG | `tests/exportSvg.test.ts` | unchanged M3 tests pass on the new shared primitives |
 
 ## 2. End-to-end smoke test: `npm run e2e`
 
@@ -168,6 +178,26 @@ Last result: **78 checks passed, 0 failed** — 3 consecutive runs, together wit
   and truncated files are refused with the open drawing untouched and the bad file
   unmodified; no console errors.
 
+### Milestone 4 end-to-end suite: `tests-e2e/milestone4.mjs` (development build)
+
+Last result: **31 checks passed, 0 failed** (with M1 64, M2 62, M3 78 in the same run).
+Ctrl+P PDF (A3, a 100 mm line is exactly 283.4646 pt, hidden layer absent, poppler
+reads it as A3); autosave writes outside the project, off removes the copy, on resumes,
+save removes it; SIGKILL crash → *Keep for later* (backup kept), *Discard* asks first,
+*Recover* restores 4 lines as unsaved without touching the original, hands the backup to
+the new session, first Save asks (Cancel leaves the original byte-identical, *Save over
+original* writes it); damaged backup reported and deleted only on request; a `.a3d`
+passed on the command line opens at start-up; no copies left after normal exits.
+
+### Packaged-app smoke test: `tests-e2e/packaged-smoke.mjs` (any OS)
+
+18 checks against an installed/packaged app with a temporary profile: runs from packaged
+files with the production CSP, version, drawing by numbers, PDF export (A3 true size),
+autosave to the app-data folder, crash (SIGKILL) → recovery dialog → recovered unsaved
+drawing, Save As (v3) removes the backup, reopen, no renderer errors, clean quit leaves
+no backup. **Linux packaged build: 18/18 here.** Windows (installed via the NSIS
+installer) and macOS (installed from the DMG) run it in CI.
+
 ### Additional one-off checks performed
 
 * `npm run dev` starts Vite and Electron and the window stays up.
@@ -201,3 +231,7 @@ Run `npm install` and then `npm run dev`, and check each item:
 - [ ] (M3) Constrain two lines parallel, then drag one: the other follows; try a conflicting value: refused
 - [ ] (M3) Open a Milestone 1/2 file: upgrade notice; Save asks before upgrading
 - [ ] (M3) Export SVG and open it in a browser: hidden layers absent, true size in mm
+- [ ] (M4) Install with the Windows installer / macOS DMG; launch from the Start menu / Applications; double-click a `.a3d`
+- [ ] (M4) Export PDF, print at 100 % / Actual size, measure a known line with a ruler
+- [ ] (M4) Draw, wait 2 minutes, end the process in Task Manager / Activity Monitor, restart: Recover
+- [ ] (M4) Uninstall from Settings ▸ Apps (Windows) / move to Bin (macOS)

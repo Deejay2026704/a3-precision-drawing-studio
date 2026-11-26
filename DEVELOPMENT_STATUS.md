@@ -1,6 +1,70 @@
 # Development Status
 
-## Milestone 3 — Constraints, layers, robust project files: **complete** (26 Nov 2026)
+## Milestone 4 — Installers, PDF export, autosave (26 Nov 2026)
+
+### PDF export — complete
+File ▸ Export PDF… (`Ctrl+P`). A pure-TypeScript vector PDF writer (no print engine):
+one page the size of the sheet (A3 landscape 1190.55 × 841.89 pt), paper mm → pt by
+72/25.4 so printing at **100 % / Actual size** gives true scale; only visible layers, each
+as a toggleable PDF layer; standard Helvetica text (⌀ is printed as Ø); circles and arcs as
+≤ 22.5° cubic Béziers (radial error < 1e-4 mm, tested). Shares one primitives layer with
+SVG export. Verified by unit tests, by poppler (`pdfinfo`/`pdftotext`/`pdftoppm`), and
+visually.
+
+### Autosave and crash recovery — complete
+Every 2 minutes while there are unsaved changes (File ▸ Autosave On/Off; status bar
+shows the last autosave). Recovery copies are kept **separate** from projects in the app
+data folder, one per session, written atomically, deleted after Save / Don't save / normal
+quit. After a crash the next start offers Recover / Keep for later / Discard (confirmed);
+damaged backups are reported and only deleted on request; a recovered drawing opens
+*unsaved* and the first Save asks before writing over the original. Verified with a real
+`SIGKILL` crash in both the development and the packaged app.
+
+### Installers — see "CI verification" below
+* `electron-builder.config.cjs`: Windows NSIS (x64 + arm64; wizard with folder choice,
+  per-user install without admin, Start-menu/desktop shortcuts, `.a3d` association,
+  uninstaller keeps recovery data) and macOS DMG + ZIP (x64 + arm64, hardened runtime,
+  ad-hoc signed unless a certificate is supplied, notarised when Apple credentials are
+  supplied, `.a3d` document type). App icon in `build/`.
+* `.a3d` files passed by the OS (double-click, "Open with", second launch, macOS
+  open-file) open in the running app; only one instance runs.
+* React moved to devDependencies (it is bundled by Vite): the installed app contains only
+  `dist/`, `dist-electron/` and `package.json` (no `node_modules`, no source maps).
+* `.github/workflows/installers.yml`: tests on Linux, then builds the installers on
+  `windows-latest` and `macos-latest`, **installs them** (silent NSIS install / DMG copy),
+  runs `tests-e2e/packaged-smoke.mjs` against the installed app (incl. crash recovery and
+  PDF export), uninstalls on Windows, and uploads the installers as artifacts (attached to
+  a GitHub Release for `v*` tags).
+
+**Built and tested in this (Linux) environment:** the packaged app (`--linux dir`,
+identical app contents to the Windows/macOS builds): 18/18 packaged smoke checks. The
+Windows installer could *not* be finished here: NSIS needs Wine to generate the
+uninstaller and Wine crashes in this sandbox (`free(): invalid pointer` on a trivial
+command); macOS DMGs can only be built on macOS. Both are therefore built and tested in CI.
+
+### CI verification
+*Pending:* CI run [45769466723](https://github.com/Deejay2026704/a3-precision-drawing-studio/actions/runs/45769466723)
+(build, install and smoke-test on Windows and macOS) was still running when this was written.
+This section will be updated with its result.
+
+### Defects found and fixed during Milestone 4
+1. Dialog test-id collision (recovery dialog container vs its Recover button).
+2. Stale "Autosaved hh:mm" shown after turning autosave off and on.
+3. E2E suites assumed the window was laid out 0.5 s after start; slower CI machines
+   failed the first visibility checks. All suites now wait for real layout.
+
+### Known limitations (Milestone 4)
+* **Unsigned installers**: SmartScreen (Windows) and Gatekeeper (macOS) warn until code-
+  signing certificates / Apple notarisation credentials are added as CI secrets.
+* No auto-update (electron-updater) yet; no Linux installer (not a target platform).
+* PDF: one page (the sheet), standard Helvetica only (characters outside Latin-1 print
+  as `?`); no print dialog integration – print the PDF at 100 %.
+* Autosave interval is fixed at 2 minutes (on/off only).
+* The Windows ARM64 installer is built but only the x64 one is installed/tested in CI.
+
+---
+
+## Milestone 3 — Constraints, layers, robust project files (complete)
 
 Built on Milestone 2 without removing or redesigning anything. The project format moved
 to version 3 *additively*; versions 1 and 2 are migrated on open.
@@ -225,9 +289,8 @@ Windows packaging (electron-builder NSIS), snapping to object points, a coordina
 command line (e.g. `@100<30`), dimensions, layers, print or PDF export at true scale,
 and filled shapes with inside hit-testing.
 
-## Recommended Milestone 4
+## Recommended Milestone 5
 
-Windows packaging (electron-builder NSIS installer) and a first full run on real Windows
-hardware; print / PDF export at true scale; autosave with a recovery flow; arcs (enabling
-trimming of circles, fillet/chamfer and arc constraints); radius and two-line angle
-constraints.
+Code signing + notarisation and auto-update; arcs (enabling trimming of circles,
+fillet/chamfer and arc constraints); radius and two-line angle constraints; multi-page /
+title-block print layouts.
