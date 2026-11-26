@@ -419,18 +419,19 @@ export function App() {
 
   const exportPdfWith = async (layout: PdfLayout) => {
     const s = stateRef.current;
-    const suffix = layout === 'a3' ? '' : layout === 'a4-tiled' ? '-A4-tiled' : '-A4-fit';
+    const suffix = { a3: '', 'a4-tiled': '-A4-tiled', 'a4-fit': '-A4-fit', 'letter-tiled': '-Letter-tiled', 'letter-fit': '-Letter-fit' }[layout];
     const name = s.fileName.replace(/\.a3d$/i, '') + suffix + '.pdf';
     try {
       const bytes = exportPdf(s.doc, { title: s.fileName.replace(/\.a3d$/i, ''), layout });
       const path = await files.exportPdf(bytes, name);
       if (!path) return;
+      const paperName = layout.startsWith('letter') ? 'Letter' : 'A4';
       const how =
         layout === 'a3'
           ? 'A3 at true scale (print at 100 % / Actual size)'
-          : layout === 'a4-tiled'
-            ? 'A4 tiles at true scale (print at 100 % / Actual size)'
-            : 'fitted to A4 – NOT to scale';
+          : layout.endsWith('tiled')
+            ? `${paperName} tiles at true scale (print at 100 % / Actual size)`
+            : `fitted to ${paperName} – NOT to scale`;
       dispatch({ type: 'setMessage', message: `Exported ${baseName(path)} – ${how}, visible layers only` });
     } catch (err) {
       dispatch({ type: 'setMessage', message: `⚠ PDF export failed: ${(err as Error).message}` });
@@ -463,13 +464,21 @@ export function App() {
     checkForUpdates: () => updates.check(),
     exportPdfA4: async () => {
       const a = await ask({
-        title: 'Export PDF for an A4 printer',
-        message: 'How should the A3 sheet be printed on A4 paper?',
+        title: 'Export PDF for an A4 or Letter printer',
+        message: 'How should the A3 sheet be printed on smaller paper?',
         detail: [
-          'Tiled: 4 A4 landscape pages at TRUE SCALE with 10 mm overlap and alignment marks – print at 100 % / Actual size, then tape the pages together.',
-          'Fit: the whole sheet reduced onto one A4 page – NOT to scale (marked on the page).',
+          'Tiled: 4 landscape pages at TRUE SCALE with 10 mm overlap and alignment marks – print at 100 % / Actual size, then tape the pages together.',
+          'Fit: the whole sheet reduced onto one page – NOT to scale (marked on the page).',
         ],
-        choice: { label: 'Layout', options: [{ value: 'a4-tiled', label: 'Tiled – true scale (4 pages)' }, { value: 'a4-fit', label: 'Fit to one page – not to scale' }] },
+        choice: {
+          label: 'Layout',
+          options: [
+            { value: 'a4-tiled', label: 'A4 – tiled, true scale (4 pages)' },
+            { value: 'a4-fit', label: 'A4 – fit to one page, not to scale' },
+            { value: 'letter-tiled', label: 'US Letter – tiled, true scale (4 pages)' },
+            { value: 'letter-fit', label: 'US Letter – fit to one page, not to scale' },
+          ],
+        },
         buttons: [
           { id: 'export', label: 'Export…', kind: 'primary' },
           { id: 'cancel', label: 'Cancel' },
@@ -478,7 +487,8 @@ export function App() {
         testId: 'dialog-pdf-layout',
       });
       if (a.button !== 'export') return;
-      await exportPdfWith(a.choice === 'a4-fit' ? 'a4-fit' : 'a4-tiled');
+      const choice = (['a4-tiled', 'a4-fit', 'letter-tiled', 'letter-fit'] as const).find((l) => l === a.choice) ?? 'a4-tiled';
+      await exportPdfWith(choice);
     },
     exportPdf: async () => exportPdfWith('a3'),
     exportSvg: async () => {

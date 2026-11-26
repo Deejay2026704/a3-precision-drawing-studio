@@ -1,7 +1,7 @@
 {
   "name": "a3-precision-drawing-studio",
   "productName": "A3 Precision Drawing Studio",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Precision 2D drawing and editing on an A3 sheet",
   "private": true,
   "type": "module",

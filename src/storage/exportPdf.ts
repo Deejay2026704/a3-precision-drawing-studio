@@ -117,11 +117,20 @@ const pdfDate = (d: Date) => {
  *  - 'a3'       one page the size of the sheet, true scale (default);
  *  - 'a4-tiled' the sheet split over A4 landscape pages at TRUE SCALE, with a 10 mm margin
  *               (printer-safe), 10 mm overlap between neighbours, corner marks and labels;
- *  - 'a4-fit'   the whole sheet reduced onto one A4 landscape page – marked NOT TO SCALE.
+ *  - 'a4-fit'   the whole sheet reduced onto one A4 landscape page – marked NOT TO SCALE;
+ *  - 'letter-tiled' / 'letter-fit': the same on US Letter (11 × 8.5 in) paper.
  */
-export type PdfLayout = 'a3' | 'a4-tiled' | 'a4-fit';
+export type PdfLayout = 'a3' | 'a4-tiled' | 'a4-fit' | 'letter-tiled' | 'letter-fit';
 
-export const A4_LANDSCAPE = { widthMm: 297, heightMm: 210 } as const;
+export interface Paper {
+  readonly name: string;
+  readonly widthMm: number;
+  readonly heightMm: number;
+}
+export const A4_LANDSCAPE = { name: 'A4', widthMm: 297, heightMm: 210 } as const;
+/** US Letter, 11 × 8.5 in. */
+export const LETTER_LANDSCAPE = { name: 'Letter', widthMm: 279.4, heightMm: 215.9 } as const;
+export const paperFor = (layout: PdfLayout): Paper => (layout.startsWith('letter') ? LETTER_LANDSCAPE : A4_LANDSCAPE);
 export const TILE_MARGIN_MM = 10;
 export const TILE_OVERLAP_MM = 10;
 
@@ -136,9 +145,12 @@ export interface Tile {
 }
 
 /** Tiles covering a sheet with A4 landscape pages (printable area minus margins, with overlap). */
-export function a4Tiles(sheetW: number, sheetH: number): Tile[] {
-  const pw = A4_LANDSCAPE.widthMm - 2 * TILE_MARGIN_MM;
-  const ph = A4_LANDSCAPE.heightMm - 2 * TILE_MARGIN_MM;
+export const a4Tiles = (sheetW: number, sheetH: number): Tile[] => paperTiles(sheetW, sheetH, A4_LANDSCAPE);
+
+/** Tiles covering a sheet with landscape pages of `paper` (printable area minus margins, with overlap). */
+export function paperTiles(sheetW: number, sheetH: number, paper: Paper): Tile[] {
+  const pw = paper.widthMm - 2 * TILE_MARGIN_MM;
+  const ph = paper.heightMm - 2 * TILE_MARGIN_MM;
   const step = (p: number) => p - TILE_OVERLAP_MM;
   const count = (sheet: number, p: number) => (sheet <= p ? 1 : Math.ceil((sheet - TILE_OVERLAP_MM) / step(p)));
   const cols = count(sheetW, pw);
@@ -160,6 +172,7 @@ const pdfDateFor = (opts: PdfOptions) => pdfDate(opts.date ?? new Date());
 
 export function exportPdf(doc: DrawingDocument, opts: PdfOptions & { layout?: PdfLayout } = {}): Uint8Array {
   const layout = opts.layout ?? 'a3';
+  const paper = paperFor(layout);
   const layers = drawingPrimitives(doc);
   const sheet = sheetPrimitives(doc);
   const sheetW = doc.page.widthMm;
@@ -183,8 +196,8 @@ export function exportPdf(doc: DrawingDocument, opts: PdfOptions & { layout?: Pd
   let pages: Page[];
   if (layout === 'a3') {
     pages = [{ widthMm: sheetW, heightMm: sheetH, content: drawingOps }];
-  } else if (layout === 'a4-tiled') {
-    const tiles = a4Tiles(sheetW, sheetH);
+  } else if (layout === 'a4-tiled' || layout === 'letter-tiled') {
+    const tiles = paperTiles(sheetW, sheetH, paper);
     const rows = Math.max(...tiles.map((t) => t.row));
     const cols = Math.max(...tiles.map((t) => t.col));
     const m = TILE_MARGIN_MM;
@@ -207,12 +220,12 @@ export function exportPdf(doc: DrawingDocument, opts: PdfOptions & { layout?: Pd
         marks,
         text,
       ].join('\n');
-      return { widthMm: A4_LANDSCAPE.widthMm, heightMm: A4_LANDSCAPE.heightMm, content };
+      return { widthMm: paper.widthMm, heightMm: paper.heightMm, content };
     });
   } else {
     const m = TILE_MARGIN_MM;
-    const k = Math.min((A4_LANDSCAPE.widthMm - 2 * m) / sheetW, (A4_LANDSCAPE.heightMm - 2 * m - 6) / sheetH);
-    const ox = (A4_LANDSCAPE.widthMm - sheetW * k) / 2;
+    const k = Math.min((paper.widthMm - 2 * m) / sheetW, (paper.heightMm - 2 * m - 6) / sheetH);
+    const ox = (paper.widthMm - sheetW * k) / 2;
     const oy = m + 6;
     const content = [
       'q',
@@ -220,9 +233,9 @@ export function exportPdf(doc: DrawingDocument, opts: PdfOptions & { layout?: Pd
       `0.6 0.6 0.6 RG ${num(pt(0.2 / k))} w 0 0 ${num(pt(sheetW))} ${num(pt(sheetH))} re S`,
       drawingOps,
       'Q',
-      label(m, m, 3.5, `NOT TO SCALE – sheet reduced to ${(k * 100).toFixed(1)} % to fit A4. Use the A3 or tiled A4 layout for true scale.`),
+      label(m, m, 3.5, `NOT TO SCALE – sheet reduced to ${(k * 100).toFixed(1)} % to fit ${paper.name}. Use the A3 or a tiled layout for true scale.`),
     ].join('\n');
-    pages = [{ widthMm: A4_LANDSCAPE.widthMm, heightMm: A4_LANDSCAPE.heightMm, content }];
+    pages = [{ widthMm: paper.widthMm, heightMm: paper.heightMm, content }];
   }
 
   // Object numbers: 1 catalog, 2 pages, 3 font, 4 info, then OCGs, then (page, contents) pairs.

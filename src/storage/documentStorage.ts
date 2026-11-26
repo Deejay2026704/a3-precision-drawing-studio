@@ -40,8 +40,8 @@ import {
  * Pure functions – no file system access here (see fileService.ts).
  */
 export const FILE_FORMAT_ID = 'a3-precision-drawing';
-export const FILE_FORMAT_VERSION = 4;
-export const SUPPORTED_FORMAT_VERSIONS: readonly number[] = [1, 2, 3, 4];
+export const FILE_FORMAT_VERSION = 5;
+export const SUPPORTED_FORMAT_VERSIONS: readonly number[] = [1, 2, 3, 4, 5];
 export const FILE_EXTENSION = 'a3d';
 
 export class DocumentFormatError extends Error {
@@ -422,6 +422,15 @@ function migrate3to4(raw: Obj): Obj {
   return { ...raw, formatVersion: 4, titleBlock: DEFAULT_TITLE_BLOCK };
 }
 
+/**
+ * v4 → v5: text, closed polylines and fills are additive (nothing to convert). The version
+ * still changes so that older versions of the app refuse these files instead of silently
+ * dropping fills or the closed flag.
+ */
+function migrate4to5(raw: Obj): Obj {
+  return { ...raw, formatVersion: 5 };
+}
+
 function titleBlock(v: unknown): TitleBlock {
   const where = 'titleBlock';
   const o = obj(v, where);
@@ -435,7 +444,7 @@ function titleBlock(v: unknown): TitleBlock {
   return out as unknown as TitleBlock;
 }
 
-const MIGRATIONS: Record<number, (raw: Obj) => Obj> = { 1: migrate1to2, 2: migrate2to3, 3: migrate3to4 };
+const MIGRATIONS: Record<number, (raw: Obj) => Obj> = { 1: migrate1to2, 2: migrate2to3, 3: migrate3to4, 4: migrate4to5 };
 
 export function migrateRaw(raw: Obj): Obj {
   let cur = raw;

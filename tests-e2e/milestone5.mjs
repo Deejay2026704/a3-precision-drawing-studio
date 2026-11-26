@@ -325,13 +325,13 @@ try {
   check('SVG export contains the title block group', existsSync(svg) && readFileSync(svg, 'utf8').includes('<g id="title-block">'));
 
   // =====================================================================
-  console.log('\nH. Save / reopen (file format 4)');
+  console.log('\nH. Save / reopen (current file format)');
   const proj = path.join(tmp, 'bracket.a3d');
   await setPaths({ __savePath: proj, __openPath: proj });
   await menu('menu-save-as');
   await sleep(500);
   const saved = JSON.parse(readFileSync(proj, 'utf8'));
-  check('saved as format 4', saved.formatVersion === 4 || saved.version === 4, JSON.stringify(Object.keys(saved)));
+  check('saved in the current format (5)', saved.formatVersion === 5, JSON.stringify(Object.keys(saved)));
   const doc = saved.document ?? saved.doc ?? saved;
   check('… with arcs, the new constraints and the title block', doc.shapes.some((x) => x.kind === 'arc') && doc.constraints.some((c) => c.kind === 'angle') && doc.constraints.some((c) => c.kind === 'fixed-radius') && doc.titleBlock?.title === 'Mounting bracket');
   const beforeOpen = await st();

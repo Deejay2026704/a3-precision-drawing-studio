@@ -94,3 +94,14 @@ describe('text in files and exports', () => {
     expect(distance(textCorners(T)[0], vec(100, 100 - 2.07))).toBeLessThan(1e-9);
   });
 });
+
+describe('file format 5', () => {
+  it('a v4 file opens (upgraded, with a notice); a file from a newer version is refused', () => {
+    const v4 = JSON.parse(serializeProject(docOf(createLine('L', vec(0, 0), vec(10, 0)))));
+    v4.formatVersion = 4;
+    const p = parseProject(JSON.stringify(v4));
+    expect(p.doc.shapes).toHaveLength(1);
+    expect(p.warnings.join(' ')).toMatch(/format version 4 to 5/);
+    expect(() => parseProject(JSON.stringify({ ...v4, formatVersion: 6 }))).toThrow(/newer version/);
+  });
+});
