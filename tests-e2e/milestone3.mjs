@@ -44,6 +44,11 @@ try {
   win.on('console', (m) => m.type() === 'error' && consoleErrors.push(m.text()));
   win.on('pageerror', (e) => consoleErrors.push(String(e)));
   await win.waitForSelector('[data-testid=page-sheet]');
+  await win.waitForFunction(() => {
+    const c = document.querySelector('[data-testid=canvas]')?.getBoundingClientRect();
+    const p = document.querySelector('[data-testid=page-sheet]')?.getBoundingClientRect();
+    return !!c && !!p && c.width > 200 && p.width > 200; // laid out and fitted (slow CI machines)
+  }, undefined, { timeout: 30000 });
   await win.waitForTimeout(400);
 
   // Native dialogs are answered by the main process from these globals.

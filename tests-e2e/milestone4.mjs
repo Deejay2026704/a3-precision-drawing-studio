@@ -50,6 +50,11 @@ async function launch(fileArg) {
   win.on('pageerror', (e) => errors.push(String(e)));
   win.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
   await win.waitForSelector('[data-testid=page-sheet]');
+  await win.waitForFunction(() => {
+    const c = document.querySelector('[data-testid=canvas]')?.getBoundingClientRect();
+    const p = document.querySelector('[data-testid=page-sheet]')?.getBoundingClientRect();
+    return !!c && !!p && c.width > 200 && p.width > 200; // laid out and fitted (slow CI machines)
+  }, undefined, { timeout: 30000 });
   await app.evaluate(({ dialog }) => {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath: globalThis.__savePath });
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [globalThis.__openPath] });

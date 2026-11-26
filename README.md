@@ -3,10 +3,28 @@
 A Windows desktop application for precise 2D drawing and editing on an A3 sheet.
 It is a precision drawing tool (CAD-style), **not** a publishing application.
 
-Current state: **Milestone 3** — driving geometric constraints, layers and robust
-project files, on top of Milestone 2 (snaps, reference dimensions, trim/extend/offset/
-mirror, grips) and Milestone 1 (shell, A3 page, drawing objects, editing, scale).
-See `DEVELOPMENT_STATUS.md`.
+Current state: **Milestone 4** — Windows and macOS installers, true-scale PDF export
+and autosave with crash recovery, on top of Milestones 1–3 (drawing, editing, snaps,
+dimensions, constraints, layers, robust project files). See `DEVELOPMENT_STATUS.md`.
+
+## Installing (end users)
+
+Installers are produced by GitHub Actions on every push (workflow **Test and build
+installers**): open the run, download **windows-installers** or **macos-installers**.
+For a `v*` tag they are also attached to a GitHub Release.
+
+* **Windows 10/11:** run `A3-Precision-Drawing-Studio-Setup-<version>-x64.exe`
+  (`-arm64` for ARM PCs). The wizard lets you choose the folder and installs for the
+  current user (no admin needed) with Start-menu and desktop shortcuts; `.a3d` files
+  open in the app. The installer is **not code-signed** yet, so SmartScreen shows
+  "Windows protected your PC" → *More info* → *Run anyway*. Uninstall from Settings ▸ Apps.
+* **macOS 11+:** open `A3-Precision-Drawing-Studio-<version>-arm64.dmg` (Apple Silicon)
+  or `-x64.dmg` (Intel) and drag the app to Applications. It is ad-hoc signed but **not
+  notarised**, so the first time: right-click the app ▸ *Open* ▸ *Open* (or System
+  Settings ▸ Privacy & Security ▸ *Open Anyway*).
+
+Signing/notarisation is enabled automatically when certificates are provided as CI
+secrets (see `electron-builder.config.cjs`).
 
 ---
 
@@ -22,7 +40,11 @@ npm test           # run the automated geometry/model/storage tests (Vitest)
 npm run typecheck  # TypeScript type check
 npm run build      # production build of renderer (dist/) and main process (dist-electron/)
 npm start          # launch the production build
-npm run e2e        # all end-to-end suites (M1, M2, M3) driving the real Electron window (needs `playwright`)
+npm run dist:win   # Windows NSIS installer (run on Windows)  → release/
+npm run dist:mac   # macOS DMG + ZIP (run on a Mac)           → release/
+npm run dist:dir   # unpacked app for the current OS (testing)
+npm run e2e:packaged -- "<app executable>"   # smoke-test an installed/packaged app
+npm run e2e        # all end-to-end suites (M1–M4) driving the real Electron window (needs `playwright`)
 ```
 
 Screenshots taken from the real app during verification are in `docs/screenshots/`.
@@ -64,7 +86,10 @@ On Linux when running as root (e.g. in a container) Electron needs
 | Move objects to a layer | select them, Properties ▸ **Layer** |
 | Driving constraints | **Constrain** tab. Select a line (Horizontal, Vertical, Fixed length, Fixed angle), two lines (Parallel, Perpendicular, Equal length) or a line + circle / two circles (Tangent); or use the Coincident / Fix Position tools and click points. Disabled buttons say what to select |
 | Edit a constraint | click its purple marker: Properties shows status, value (fixed length/angle/position), Suppress, Delete |
-| Export | File ▸ Export SVG… (visible layers only, true scale in mm) |
+| Export PDF | File ▸ Export PDF… (`Ctrl+P`): vector PDF, A3 at true scale, visible layers only (each a PDF layer). Print at **100 % / Actual size** |
+| Export SVG | File ▸ Export SVG… (visible layers only, true scale in mm) |
+| Autosave | on by default, every 2 minutes while there are unsaved changes; File ▸ *Autosave: On/Off*; status bar shows the last autosave |
+| Crash recovery | after a crash, the next start offers **Recover / Keep for later / Discard**. A recovered drawing opens *unsaved*; the first Save asks before writing over the original |
 | Edit a dimension | click its text/line: Properties shows the measured value (read-only, *driven*), precision, text height, arrowheads, extension lines, offset, text shift. Drag it or its grips to reposition |
 
 ---
@@ -173,6 +198,25 @@ change to objects on a locked layer, (2) places new objects on the active layer 
 it is locked or hidden) and (3) re-applies driving constraints after geometry edits — in
 one undo step.
 
+### Milestone 4 modules
+
+| Module | Responsibility |
+| --- | --- |
+| `storage/drawingPrimitives.ts` | device-independent export primitives (paper mm, Y up, visible layers only) shared by SVG and PDF |
+| `storage/exportPdf.ts` | pure-TypeScript PDF 1.7 writer: true scale, Helvetica text, Bézier curves, one PDF layer per drawing layer |
+| `storage/autosave.ts` | recovery record format + scheduling rule (pure) |
+| `electron/autosaveStore.ts` | recovery files in `<userData>/autosave/` (one per session, atomic), orphan detection |
+| `electron-builder.config.cjs`, `build/` | installer configuration, icon, macOS entitlements |
+| `.github/workflows/installers.yml` | CI: tests, then build + install + smoke-test on Windows and macOS |
+| `tests-e2e/packaged-smoke.mjs` | smoke test for an installed/packaged app (also used in CI) |
+
+**Autosave is separate from the project.** Recovery copies live in the application data
+folder (`%APPDATA%\A3 Precision Drawing Studio\autosave` on Windows,
+`~/Library/Application Support/A3 Precision Drawing Studio/autosave` on macOS), never next
+to or over the user's `.a3d`. They are written atomically, removed after Save, after
+*Don't save*/New/Open, and on a normal quit; a crash leaves them for recovery. A recovered
+backup is handed to the new session *before* the old copy is deleted, so a copy always exists.
+
 ### Drawing objects (all in world mm)
 
 | Kind | Stored geometry |
@@ -188,20 +232,23 @@ Each object also has a style: stroke colour and line weight in **paper** mm
 ### Project folder structure
 
 ```
-electron/            main.ts (window, dialogs, IPC), preload.ts (contextBridge API), atomicWrite.ts
+electron/            main.ts (window, dialogs, IPC, file association), preload.ts, atomicWrite.ts, autosaveStore.ts
+build/               installer resources: icon.svg/png, entitlements.mac.plist
+.github/workflows/   installers.yml (CI build, install and smoke test on Windows + macOS)
 scripts/             dev.mjs (Vite + Electron dev runner), build-electron.mjs, electron-build.mjs
 src/
   geometry/          vec, angles, bounds, page (A3), scale, viewport, coords, intersect
   model/             types, shapes, operations, handles, hitTest, document,
                      anchors, snap, dimensions, modify, layers, constraints
-  storage/           documentStorage (schema, migration, validation), exportSvg, fileService (IPC adapter)
+  storage/           documentStorage (schema, migration, validation), drawingPrimitives, exportSvg,
+                     exportPdf, autosave, fileService (IPC adapter)
   render/            ShapeView, PageView, GridView, Rulers, SelectionOverlay, rulerTicks
   ui/                App, FileMenu, Ribbon, PropertiesPanel, DrawingCanvas, StatusBar, controls
   ui/state/          editorReducer (store + undo/redo)
   ui/interaction/    toolSession (click-driven modify/dimension tools)
   main.tsx           renderer entry
 tests/               Vitest unit tests (no UI, no DOM); tests/fixtures: real M1 (v1) and M2 (v2) files
-tests-e2e/           Playwright scripts that drive the real Electron window (M1, M2, M3)
+tests-e2e/           Playwright scripts that drive the real Electron window (M1–M4) + packaged-app smoke test
 docs/screenshots/    screenshots captured by the end-to-end run
 ```
 
