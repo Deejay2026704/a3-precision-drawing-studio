@@ -58,7 +58,7 @@ Last full result: **24 files, 243 tests, all passing**.
 
 ### Milestone 4 unit tests (added)
 
-Last full result: **26 files, 262 tests, all passing**.
+Last full result: **26 files, 264 tests, all passing** (incl. heartbeat-based orphan detection).
 
 | Area | File | What is verified |
 | --- | --- | --- |
@@ -195,8 +195,15 @@ passed on the command line opens at start-up; no copies left after normal exits.
 files with the production CSP, version, drawing by numbers, PDF export (A3 true size),
 autosave to the app-data folder, crash (SIGKILL) → recovery dialog → recovered unsaved
 drawing, Save As (v3) removes the backup, reopen, no renderer errors, clean quit leaves
-no backup. **Linux packaged build: 18/18 here.** Windows (installed via the NSIS
-installer) and macOS (installed from the DMG) run it in CI.
+no backup. Results: **Linux packaged build 18/18; Windows x64 installed via the NSIS
+installer 18/18 (then silently uninstalled); macOS arm64 installed from the DMG 18/18**
+(CI run 45773715800).
+
+### CI: `.github/workflows/installers.yml`
+Linux: typecheck, unit tests, all E2E suites under Xvfb → Windows: build NSIS (x64, arm64),
+silent install, packaged smoke test on the installed app, silent uninstall → macOS: build
+DMG + ZIP (arm64, x64), `hdiutil verify`, install from DMG, `codesign --verify`, check the
+`.a3d` document type, packaged smoke test. Installers uploaded as artifacts.
 
 ### Additional one-off checks performed
 

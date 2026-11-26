@@ -1,6 +1,6 @@
 # Development Status
 
-## Milestone 4 — Installers, PDF export, autosave (26 Nov 2026)
+## Milestone 4 — Installers, PDF export, autosave: **complete** (26 Nov 2026)
 
 ### PDF export — complete
 File ▸ Export PDF… (`Ctrl+P`). A pure-TypeScript vector PDF writer (no print engine):
@@ -36,22 +36,40 @@ damaged backups are reported and only deleted on request; a recovered drawing op
   PDF export), uninstalls on Windows, and uploads the installers as artifacts (attached to
   a GitHub Release for `v*` tags).
 
-**Built and tested in this (Linux) environment:** the packaged app (`--linux dir`,
+**Built and tested in the Linux development environment:** the packaged app (`--linux dir`,
 identical app contents to the Windows/macOS builds): 18/18 packaged smoke checks. The
 Windows installer could *not* be finished here: NSIS needs Wine to generate the
 uninstaller and Wine crashes in this sandbox (`free(): invalid pointer` on a trivial
 command); macOS DMGs can only be built on macOS. Both are therefore built and tested in CI.
 
-### CI verification
-*Pending:* CI run [45769466723](https://github.com/Deejay2026704/a3-precision-drawing-studio/actions/runs/45769466723)
-(build, install and smoke-test on Windows and macOS) was still running when this was written.
-This section will be updated with its result.
+### CI verification — passed
+CI run [45773715800](https://github.com/Deejay2026704/a3-precision-drawing-studio/actions/runs/45773715800)
+(commit `ce1bd74`), all jobs green:
+
+| Job | Result |
+| --- | --- |
+| Linux: typecheck, unit, end-to-end | 263 unit tests (1 poppler test skipped – not installed on the runner); E2E 64 + 62 + 78 + 30 |
+| **Windows** (`windows-latest`) | NSIS installers built (x64 116 MB, arm64); **silent install** to a chosen folder; **18/18 smoke checks on the installed app** (incl. PDF export, autosave, crash via `taskkill /F /T` and recovery); **silent uninstall** removed the app |
+| **macOS** (`macos-latest`, Apple Silicon) | DMG + ZIP built for arm64 and x64; `hdiutil verify` on both DMGs; installed from the DMG; `codesign --verify --deep --strict` valid; `.a3d` document type registered; **18/18 smoke checks on the installed app** |
+
+Installers are downloadable from that run's artifacts (`windows-installers`,
+`macos-installers`); tagging `v0.4.0` would also publish them to a GitHub Release.
 
 ### Defects found and fixed during Milestone 4
-1. Dialog test-id collision (recovery dialog container vs its Recover button).
-2. Stale "Autosaved hh:mm" shown after turning autosave off and on.
-3. E2E suites assumed the window was laid out 0.5 s after start; slower CI machines
-   failed the first visibility checks. All suites now wait for real layout.
+1. **Crash recovery on Windows** (found through CI diagnostics): Windows reports a
+   terminated process as existing while handles to it are open, so the PID check could
+   hide a crashed session's backup. Sessions now keep a heartbeat file; a backup is
+   recoverable when its process is gone *or* its heartbeat is stale (30 s).
+2. An app instance that lost the single-instance lock still created a window while
+   quitting; it now never opens one.
+3. macOS: ad-hoc signing with the hardened runtime needs the
+   `disable-library-validation` entitlement or the app may not launch – added.
+4. CI builds tried to publish implicitly (no token) – builds now use `--publish never`.
+5. Stale "Autosaved hh:mm" shown after turning autosave off and on.
+6. Test-harness issues: dialog test-id collision; fixed 0.5 s start-up wait (now waits for
+   layout); `ELECTRON_RUN_AS_NODE=''` counts as *set* on Windows (now removed instead);
+   `tasklist` truncates image names (now CSV); crash simulated like Task Manager.
+7. Added main-process diagnostics (`<userData>/logs/main.log`, stderr) – they pinpointed #1.
 
 ### Known limitations (Milestone 4)
 * **Unsigned installers**: SmartScreen (Windows) and Gatekeeper (macOS) warn until code-
@@ -60,7 +78,9 @@ This section will be updated with its result.
 * PDF: one page (the sheet), standard Helvetica only (characters outside Latin-1 print
   as `?`); no print dialog integration – print the PDF at 100 %.
 * Autosave interval is fixed at 2 minutes (on/off only).
-* The Windows ARM64 installer is built but only the x64 one is installed/tested in CI.
+* The Windows ARM64 installer and the macOS Intel build are built but only the Windows
+  x64 and macOS Apple Silicon builds are installed and smoke-tested in CI.
+* Not yet tested by a person on physical Windows/macOS hardware (only CI runners).
 
 ---
 
