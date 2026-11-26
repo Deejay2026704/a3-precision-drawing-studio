@@ -70,9 +70,9 @@ jobs:
           npm install --no-save playwright@${{ env.PLAYWRIGHT_VERSION }}
           node tests-e2e/packaged-smoke.mjs "C:\A3Test\A3 Precision Drawing Studio.exe"
       - name: Build a NEWER version (99.0.0) for the auto-update test
-        shell: pwsh
+        shell: bash # PowerShell mangles the -c.extraMetadata.version=… argument
         run: |
-          if (-not $env:WIN_CSC_LINK) { Remove-Item Env:WIN_CSC_LINK, Env:WIN_CSC_KEY_PASSWORD -ErrorAction SilentlyContinue }  # unsigned build when no secret
+          [ -z "$WIN_CSC_LINK" ] && unset WIN_CSC_LINK WIN_CSC_KEY_PASSWORD  # unsigned build when no secret
           npx electron-builder --config electron-builder.config.cjs --publish never --win --x64 -c.win.target=nsis -c.directories.output=release-update -c.extraMetadata.version=99.0.0
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
