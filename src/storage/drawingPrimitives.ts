@@ -1,7 +1,8 @@
 import { scaleFactor } from '../geometry/scale';
 import { vec, type Vec2 } from '../geometry/vec';
 import { layoutDimension } from '../model/dimensions';
-import { layerOf, resolveStroke, visibleDimensions, visibleShapes } from '../model/layers';
+import { layerOf, resolveFill, resolveStroke, visibleDimensions, visibleShapes } from '../model/layers';
+import { fillOutline, HATCH_WEIGHT_MM, hatchSegments } from '../model/fill';
 import { rectCorners } from '../model/shapes';
 import { titleBlockLayout } from '../model/titleBlock';
 import type { ArrowheadStyle, DrawingDocument, Layer } from '../model/types';
@@ -90,7 +91,20 @@ export function drawingPrimitives(doc: DrawingDocument): ExportLayer[] {
             prim = { kind: 'polyline', pts: s.points.map(P), closed: !!s.closed, stroke, width };
             break;
         }
-        items.push({ id: s.id, kind: 'shape', prims: [prim] });
+        // Fill/hatch first, so the outline is drawn on top of it.
+        const fill = s.style.fill;
+        const fillColor = resolveFill(doc, s);
+        const under: Prim[] = [];
+        if (fill && fillColor) {
+          if (fill.pattern === 'solid') {
+            const outline = s.kind === 'circle' ? null : fillOutline(s);
+            if (s.kind === 'circle') under.push({ kind: 'disc', c: P(s.center), r: s.radius * k, color: fillColor });
+            else if (outline) under.push({ kind: 'fill', pts: outline.map(P), color: fillColor });
+          } else {
+            for (const [a, b] of hatchSegments(s, fill, doc.scale) ?? []) under.push({ kind: 'line', a: P(a), b: P(b), stroke: fillColor, width: HATCH_WEIGHT_MM });
+          }
+        }
+        items.push({ id: s.id, kind: 'shape', prims: [...under, prim] });
       }
       for (const d of dims) {
         if (layerOf(doc, d).id !== layer.id) continue;

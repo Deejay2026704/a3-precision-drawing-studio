@@ -18,6 +18,9 @@ import {
   type PointRef,
   type Shape,
   type ShapeStyle,
+  type FillPattern,
+  type FillStyle,
+  BY_LAYER,
 } from '../model/types';
 
 /**
@@ -168,9 +171,22 @@ function point(v: unknown, where: string): Vec2 {
   return { x: num(o, 'x', where), y: num(o, 'y', where) };
 }
 
+const FILL_PATTERNS: readonly FillPattern[] = ['solid', 'hatch', 'crosshatch'];
+
+function fillStyle(v: unknown, where: string): FillStyle {
+  const w = `${where}.style.fill`;
+  const o = obj(v, w);
+  const pattern = str(o, 'pattern', w) as FillPattern;
+  if (!FILL_PATTERNS.includes(pattern)) throw err(`${w}.pattern`, `must be one of ${FILL_PATTERNS.join(', ')}`);
+  const color = str(o, 'color', w);
+  if (color !== BY_LAYER && !/^#[0-9a-fA-F]{6}$/.test(color)) throw err(`${w}.color`, 'must be #RRGGBB or "bylayer"');
+  return { pattern, color, angleDeg: num(o, 'angleDeg', w), spacingMm: num(o, 'spacingMm', w, { gt: 0 }) };
+}
+
 function style(v: unknown, where: string): ShapeStyle {
   const o = obj(v, `${where}.style`);
-  return { stroke: str(o, 'stroke', `${where}.style`), strokeWidthMm: num(o, 'strokeWidthMm', `${where}.style`, { min: 0 }) };
+  const base = { stroke: str(o, 'stroke', `${where}.style`), strokeWidthMm: num(o, 'strokeWidthMm', `${where}.style`, { min: 0 }) };
+  return o.fill === undefined ? base : { ...base, fill: fillStyle(o.fill, where) };
 }
 
 const layerIdOf = (o: Obj, where: string): { layerId?: string } => {

@@ -2,11 +2,21 @@ import { boundsContains, type Bounds } from '../geometry/bounds';
 import { distance, distanceToSegment, type Vec2 } from '../geometry/vec';
 import { distanceToArc } from '../geometry/arc';
 import { arcGeom } from './arcs';
+import { pointInPolygon } from '../geometry/hatch';
+import { fillOutline } from './fill';
 import { polylineSegments, rectCorners, shapeBounds } from './shapes';
 import type { Shape, ShapeId } from './types';
 
-/** Distance (world mm) from p to the outline of a shape. */
+/** Distance (world mm) from p to the outline of a shape; 0 anywhere inside a FILLED shape. */
 export function distanceToShape(s: Shape, p: Vec2): number {
+  if (s.style.fill) {
+    const outline = fillOutline(s);
+    if (outline && pointInPolygon(p, outline)) return 0;
+  }
+  return distanceToOutline(s, p);
+}
+
+function distanceToOutline(s: Shape, p: Vec2): number {
   switch (s.kind) {
     case 'line':
       return distanceToSegment(p, s.start, s.end);

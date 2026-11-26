@@ -45,6 +45,13 @@ export function visibleDimensions(doc: DrawingDocument): Dimension[] {
 export const editableShapes = (doc: DrawingDocument): Shape[] => doc.shapes.filter((s) => isEditable(doc, s));
 export const editableDimensions = (doc: DrawingDocument): Dimension[] => doc.dimensions.filter((d) => isEditable(doc, d));
 
+/** Resolved fill colour for display/export (null = no fill). */
+export function resolveFill(doc: Pick<DrawingDocument, 'layers'>, s: Shape): string | null {
+  const f = s.style.fill;
+  if (!f) return null;
+  return f.color === BY_LAYER ? layerOf(doc, s).color : f.color;
+}
+
 /** Resolved stroke colour for display/export. */
 export function resolveStroke(doc: Pick<DrawingDocument, 'layers'>, s: Shape): string {
   return s.style.stroke === BY_LAYER ? layerOf(doc, s).color : s.style.stroke;

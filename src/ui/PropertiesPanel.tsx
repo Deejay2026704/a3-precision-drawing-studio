@@ -21,6 +21,8 @@ import {
 import { lineAngle, lineLength, polylineArea, polylineLength, shapeBounds } from '../model/shapes';
 import { LINE_WEIGHTS, SHAPE_KIND_LABELS, TITLE_BLOCK_FIELDS, type Shape, type ShapeId, type ShapeStyle, type TitleBlock } from '../model/types';
 import { todayIso } from '../model/titleBlock';
+import { DEFAULT_FILL, FILL_PATTERN_LABELS, type FillPattern, type FillStyle } from '../model/types';
+import { hatchSegments, isFillable, MIN_HATCH_SPACING_MM } from '../model/fill';
 import { TextField } from './TextField';
 import { NumberField } from './NumberField';
 import type { EditorAction, EditorState } from './state/editorReducer';
@@ -88,6 +90,7 @@ export function PropertiesPanel({ state, dispatch, newId }: { state: EditorState
       {shapes.length > 1 && <MultiProperties state={state} shapes={shapes} update={update} />}
       {shapes.length > 0 && dims.length > 0 && <p className="hint">+ {dims.length} dimension{dims.length === 1 ? '' : 's'} in the selection</p>}
       {shapes.length > 0 && <StyleProperties shapes={shapes} update={update} />}
+      {shapes.length > 0 && shapes.every(isFillable) && <FillProperties shapes={shapes} update={update} scale={doc.scale} />}
     </aside>
   );
 }
@@ -307,6 +310,77 @@ function StyleProperties({ shapes, update }: { shapes: Shape[]; update: Update }
           ))}
         </select>
       </label>
+    </section>
+  );
+}
+
+/** Fill / hatch of closed shapes (rectangles, circles, closed polylines). */
+function FillProperties({ shapes, update, scale }: { shapes: Shape[]; update: Update; scale: DrawingScale }) {
+  const first = shapes[0].style.fill;
+  const same = shapes.every((s) => JSON.stringify(s.style.fill ?? null) === JSON.stringify(first ?? null));
+  const set = (fill: FillStyle | null, what: string) =>
+    update(
+      shapes.map((s) => {
+        const { fill: _f, ...rest } = s.style;
+        void _f;
+        return { ...s, style: fill ? { ...rest, fill } : rest };
+      }),
+      what,
+    );
+  const cur = same ? first : undefined;
+  const patch = (p: Partial<FillStyle>, what: string) => set({ ...(cur ?? DEFAULT_FILL), ...p }, what);
+  const tooDense = cur && cur.pattern !== 'solid' && shapes.some((s) => hatchSegments(s, cur, scale) === null);
+  return (
+    <section className="panel-section" data-testid="fill-panel">
+      <h3>Fill</h3>
+      <label className="field">
+        <span className="field-label">Pattern</span>
+        <select
+          data-testid="prop-fill"
+          value={same ? (first?.pattern ?? 'none') : ''}
+          onChange={(e) => (e.target.value === 'none' ? set(null, 'Fill removed') : patch({ pattern: e.target.value as FillPattern }, `Fill: ${FILL_PATTERN_LABELS[e.target.value as FillPattern].toLowerCase()}`))}
+        >
+          {!same && <option value="">(mixed)</option>}
+          <option value="none">None</option>
+          {(Object.keys(FILL_PATTERN_LABELS) as FillPattern[]).map((p) => (
+            <option key={p} value={p}>
+              {FILL_PATTERN_LABELS[p]}
+            </option>
+          ))}
+        </select>
+      </label>
+      {cur && (
+        <>
+          <label className="field">
+            <span className="field-label">Colour</span>
+            <select data-testid="prop-fill-color" value={cur.color} onChange={(e) => patch({ color: e.target.value }, 'Fill colour changed')}>
+              {PEN_COLOURS.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {cur.pattern !== 'solid' && (
+            <div className="field-grid">
+              <NumberField label="Angle" unit="°" testId="prop-hatch-angle" value={cur.angleDeg} onCommit={(v) => patch({ angleDeg: v }, 'Hatch angle changed')} />
+              <NumberField
+                label="Spacing"
+                testId="prop-hatch-spacing"
+                min={MIN_HATCH_SPACING_MM}
+                value={cur.spacingMm}
+                onCommit={(v) => patch({ spacingMm: Math.max(MIN_HATCH_SPACING_MM, v) }, 'Hatch spacing changed')}
+                title="Distance between hatch lines ON PAPER (mm) – the same at any drawing scale"
+              />
+            </div>
+          )}
+          {tooDense && (
+            <p className="hint warn" data-testid="hatch-too-dense">
+              ⚠ Too many hatch lines for this size – increase the spacing. The hatch is not drawn or exported.
+            </p>
+          )}
+        </>
+      )}
     </section>
   );
 }

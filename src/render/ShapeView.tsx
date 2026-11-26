@@ -1,4 +1,6 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
+import type { DrawingScale } from '../geometry/scale';
+import { HATCH_WEIGHT_MM, hatchSegments } from '../model/fill';
 import { worldToScreen, type ViewTransform } from '../geometry/coords';
 import { pxPerPageMm } from '../geometry/viewport';
 import { pxPerWorldMm } from '../geometry/coords';
@@ -17,13 +19,40 @@ interface Props {
   /** Optional override, e.g. for previews. */
   stroke?: string;
   dashed?: boolean;
+  /** Resolved fill/hatch colour (By layer already applied); needed to draw the shape's fill. */
+  fillColor?: string;
+  /** Drawing scale (hatch spacing is in paper mm). */
+  scale?: DrawingScale;
 }
 
 /** Renders one shape as vector SVG, converting world mm → screen px. Never mutates geometry. */
-export const ShapeView = memo(function ShapeView({ shape, transform, stroke, dashed }: Props) {
+export const ShapeView = memo(function ShapeView({ shape, transform, stroke, dashed, fillColor, scale }: Props) {
+  const fill = fillColor && scale ? shape.style.fill : undefined;
+  const hatch = useMemo(() => (fill && scale && fill.pattern !== 'solid' ? hatchSegments(shape, fill, scale) : null), [shape, fill, scale]);
+  const outline = <Outline shape={shape} transform={transform} stroke={stroke} dashed={dashed} solid={fill?.pattern === 'solid' ? fillColor : undefined} />;
+  if (!fill || !fillColor) return outline;
+  const S = (p: { x: number; y: number }) => worldToScreen(p, transform);
+  const w = Math.max(MIN_STROKE_PX, HATCH_WEIGHT_MM * pxPerPageMm(transform.viewport));
+  return (
+    <g data-fill={fill.pattern} data-fill-of={shape.id}>
+      {hatch && (
+        <g className="hatch" stroke={fillColor} strokeWidth={w} pointerEvents="none">
+          {hatch.map(([a, b], i) => {
+            const p = S(a);
+            const q = S(b);
+            return <line key={i} x1={p.x} y1={p.y} x2={q.x} y2={q.y} />;
+          })}
+        </g>
+      )}
+      {outline}
+    </g>
+  );
+});
+
+const Outline = memo(function Outline({ shape, transform, stroke, dashed, solid }: { shape: Shape; transform: ViewTransform; stroke?: string; dashed?: boolean; solid?: string }) {
   const strokeWidth = Math.max(MIN_STROKE_PX, shape.style.strokeWidthMm * pxPerPageMm(transform.viewport));
   const common = {
-    fill: 'none',
+    fill: solid ?? 'none',
     stroke: stroke ?? shape.style.stroke,
     strokeWidth,
     strokeLinecap: 'round' as const,

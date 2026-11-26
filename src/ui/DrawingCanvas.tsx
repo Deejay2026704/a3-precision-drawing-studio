@@ -19,7 +19,7 @@ import { distanceToShape, hitTest, shapesInsideBounds } from '../model/hitTest';
 import { moveShape } from '../model/operations';
 import { createCircle, createLine, createPolyline, createRectFromCorners, lineAngle, lineLength } from '../model/shapes';
 import { findSnap, type SnapResult, type SnapSettings } from '../model/snap';
-import { editableDimensions, editableShapes, isEditable, isVisible, resolveStroke, visibleDimensions, visibleShapes } from '../model/layers';
+import { editableDimensions, editableShapes, isEditable, isVisible, resolveFill, resolveStroke, visibleDimensions, visibleShapes } from '../model/layers';
 import { CONSTRAINT_GLYPHS, constraintMarkerAnchors, constraintShapeIds, constraintStatus, type ConstraintStatus } from '../model/constraints';
 import type { Constraint, Dimension, Shape, ShapeId } from '../model/types';
 import { DimensionLayoutView, DimensionView } from '../render/DimensionView';
@@ -644,7 +644,7 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
           <SheetView doc={doc} transform={transform} />
           <g data-testid="shapes">
             {shown.map((s) => (
-              <ShapeView key={s.id} shape={s} transform={transform} stroke={selectedSet.has(s.id) && tool !== 'select' ? '#1a73e8' : resolveStroke(doc, s)} />
+              <ShapeView key={s.id} shape={s} transform={transform} stroke={selectedSet.has(s.id) && tool !== 'select' ? '#1a73e8' : resolveStroke(doc, s)} fillColor={resolveFill(doc, s) ?? undefined} scale={doc.scale} />
             ))}
           </g>
           <g data-testid="dimensions">

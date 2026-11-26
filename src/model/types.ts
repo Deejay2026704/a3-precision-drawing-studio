@@ -8,10 +8,28 @@ export type LayerId = string;
 /** Stroke value meaning "use the layer's display colour". */
 export const BY_LAYER = 'bylayer';
 
+export type FillPattern = 'solid' | 'hatch' | 'crosshatch';
+
+/** Area fill of a closed shape (Milestone 6). Spacing is PAPER mm. */
+export interface FillStyle {
+  readonly pattern: FillPattern;
+  /** '#rrggbb' or BY_LAYER. */
+  readonly color: string;
+  /** Hatch direction, degrees counter-clockwise from +X. */
+  readonly angleDeg: number;
+  /** Distance between hatch lines on paper (mm). */
+  readonly spacingMm: number;
+}
+
+export const DEFAULT_FILL: FillStyle = Object.freeze({ pattern: 'hatch', color: BY_LAYER, angleDeg: 45, spacingMm: 3 });
+export const FILL_PATTERN_LABELS: Record<FillPattern, string> = { solid: 'Solid', hatch: 'Hatch', crosshatch: 'Cross-hatch' };
+
 /** Visual style. Line weight is in PAPER millimetres (it does not scale with the drawing). */
 export interface ShapeStyle {
   readonly stroke: string;
   readonly strokeWidthMm: number;
+  /** Only on closed shapes (rectangle, circle, closed polyline). Absent = no fill. */
+  readonly fill?: FillStyle;
 }
 
 interface ShapeBase {

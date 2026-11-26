@@ -54,7 +54,7 @@ describe('closed polylines and polygons', () => {
     expect(polylineArea(inner)).toBeCloseTo(30 * 10, 9);
   });
   it('inner vertices have grips; dragging one moves exactly that vertex', () => {
-    const f = getSelectionFrame([ZZ], 5);
+    const f = getSelectionFrame([ZZ], 5)!;
     expect(f.handles.map((h) => h.id)).toEqual(expect.arrayContaining(['start', 'v1', 'v2', 'end']));
     const [moved] = applyHandleDrag([ZZ], f, 'v2', vec(10, 10), vec(12, 15), {}) as PolylineShape[];
     expect(moved.points[2]).toEqual(vec(12, 15));
