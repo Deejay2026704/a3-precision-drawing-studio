@@ -91,6 +91,17 @@ jobs:
           for ($i = 0; $i -lt 60 -and (Test-Path 'C:\A3Test\A3 Precision Drawing Studio.exe'); $i++) { Start-Sleep 1 }
           if (Test-Path 'C:\A3Test\A3 Precision Drawing Studio.exe') { throw 'Uninstall did not remove the application' }
           Write-Host 'Uninstalled cleanly'
+      # One download per installer, for people installing straight from the CI run (see INSTALL.md).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: INSTALL-Windows-x64 (most PCs)
+          path: release/*-x64.exe
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: INSTALL-Windows-ARM64
+          path: release/*-arm64.exe
+          compression-level: 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -151,6 +162,16 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - name: Update check of the INSTALLED app (unsigned → notify + release page)
         run: node tests-e2e/update-e2e.mjs "$RUNNER_TEMP/Applications/A3 Precision Drawing Studio.app/Contents/MacOS/A3 Precision Drawing Studio" release-update notify 99.0.0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: INSTALL-macOS-Apple-Silicon (M1-M4)
+          path: release/*-arm64.dmg
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: INSTALL-macOS-Intel
+          path: release/*-x64.dmg
+          compression-level: 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:

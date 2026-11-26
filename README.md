@@ -10,8 +10,12 @@ autosave, arcs, title block, auto-update). See `DEVELOPMENT_STATUS.md`.
 
 ## Installing (end users)
 
+**Step-by-step guide: [INSTALL.md](INSTALL.md)** (which file to download, and how to get past the
+unsigned-app warnings on Windows and macOS).
+
 Installers are produced by GitHub Actions on every push (workflow **Test and build
-installers**): open the run, download **windows-installers** or **macos-installers**.
+installers**): open the run and download the **INSTALL-…** artifact for your computer
+(the combined **windows-installers** / **macos-installers** artifacts hold every variant).
 For a `v*` tag they are also attached to a GitHub Release.
 
 * **Windows 10/11:** run `A3-Precision-Drawing-Studio-Setup-<version>-x64.exe`
