@@ -64,7 +64,7 @@ describe('tool workflows (click sequences with real snapping)', () => {
   });
 
   it('wrong picks are refused with a message and keep the session', () => {
-    expect(clicks(doc, 'dim-radius', [vec(50, 0)])).toMatchObject({ kind: 'error', message: 'Click on a circle' });
+    expect(clicks(doc, 'dim-radius', [vec(50, 0)])).toMatchObject({ kind: 'error', message: 'Click on a circle or an arc' });
     const par = { ...doc, shapes: [L, createLine('P', vec(0, 10), vec(100, 10))] };
     expect(clicks(par, 'dim-angular', [vec(50, 0), vec(50, 10), vec(20, 5)]).kind).toBe('error');
     expect(clicks(doc, 'dim-aligned', [vec(0, 0), vec(0.2, 0.1)]).kind).toBe('error');
@@ -90,7 +90,8 @@ describe('tool workflows (click sequences with real snapping)', () => {
     expect(p.shapes.length).toBe(2);
     expect(JSON.stringify(doc)).toBe(before);
     const tp = toolPreview(newSession('trim'), { ...base, doc: { ...doc, shapes: [L, createLine('X', vec(60, -10), vec(60, 10))] }, raw: vec(80, 0), point: vec(80, 0), snap: null });
-    expect(tp.removed).toEqual([[vec(60, 0), vec(100, 0)]]);
+    expect(tp.removedShapes).toHaveLength(1);
+    expect(tp.removedShapes[0]).toMatchObject({ kind: 'line', start: vec(60, 0), end: vec(100, 0) });
   });
 });
 

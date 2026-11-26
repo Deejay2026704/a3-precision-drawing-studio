@@ -1,6 +1,7 @@
 import { polarPoint, rotatePoint, rotateVec } from '../geometry/angles';
 import { boundsHeight, boundsOfPoints, boundsWidth } from '../geometry/bounds';
 import { add, sub, vec, type Vec2 } from '../geometry/vec';
+import { arcEnd, arcStart, normalizeArc } from './arcs';
 import { lineAngle, lineLength, rectCorners, shapeBounds, shapeCenter } from './shapes';
 import type { CircleShape, LineShape, RectShape, Shape, ShapeId } from './types';
 
@@ -22,6 +23,7 @@ export function moveShape<S extends Shape>(s: S, dx: number, dy: number): S {
     case 'rect':
       return { ...s, origin: add(s.origin, d) };
     case 'circle':
+    case 'arc':
       return { ...s, center: add(s.center, d) };
     case 'polyline':
       return { ...s, points: s.points.map((p) => add(p, d)) };
@@ -45,6 +47,8 @@ export function rotateShape<S extends Shape>(s: S, deg: number, pivot: Vec2 = sh
       return { ...s, origin: rotatePoint(s.origin, pivot, deg), rotationDeg: normalizeRotation(s.rotationDeg + deg) };
     case 'circle':
       return { ...s, center: rotatePoint(s.center, pivot, deg) };
+    case 'arc':
+      return normalizeArc({ ...s, center: rotatePoint(s.center, pivot, deg), startDeg: s.startDeg + deg }) as S;
     case 'polyline':
       return { ...s, points: s.points.map((p) => rotatePoint(p, pivot, deg)) };
   }
@@ -104,6 +108,15 @@ export function scaleShape<S extends Shape>(s: S, sx: number, sy: number, anchor
     case 'circle': {
       const k = Math.sqrt(Math.abs(sx * sy));
       return { ...s, center: scalePointAbout(s.center, anchor, sx, sy), radius: s.radius * k };
+    }
+    case 'arc': {
+      // Uniform factor (an arc stays circular); a negative determinant mirrors, reversing orientation.
+      const k = Math.sqrt(Math.abs(sx * sy));
+      const c = scalePointAbout(s.center, anchor, sx, sy);
+      const ang = (p: Vec2) => (Math.atan2(p.y - c.y, p.x - c.x) * 180) / Math.PI;
+      const sp = scalePointAbout(arcStart(s), anchor, sx, sy);
+      const ep = scalePointAbout(arcEnd(s), anchor, sx, sy);
+      return normalizeArc({ ...s, center: c, radius: s.radius * k, startDeg: sx * sy < 0 ? ang(ep) : ang(sp) }) as S;
     }
     case 'rect': {
       const axisAligned = Math.abs(s.rotationDeg % 90) < 1e-9;

@@ -1,5 +1,6 @@
 import type { Primitive } from '../geometry/intersect';
 import { midpoint, type Vec2 } from '../geometry/vec';
+import { arcEnd, arcMid, arcStart } from './arcs';
 import { rectCenter, rectCorners } from './shapes';
 import type { DimAnchor, DrawingDocument, Shape } from './types';
 
@@ -38,6 +39,13 @@ export function shapeKeyPoints(s: Shape): KeyedPoint[] {
     }
     case 'circle':
       return [{ key: 'center', kind: 'center', point: s.center }];
+    case 'arc':
+      return [
+        { key: 'start', kind: 'endpoint', point: arcStart(s) },
+        { key: 'end', kind: 'endpoint', point: arcEnd(s) },
+        { key: 'mid', kind: 'midpoint', point: arcMid(s) },
+        { key: 'center', kind: 'center', point: s.center },
+      ];
     case 'polyline':
       return [
         ...s.points.map((p, i) => ({ key: `v${i}`, kind: 'endpoint' as const, point: p })),
@@ -72,6 +80,8 @@ export function shapePrimitives(s: Shape): Primitive[] {
       return segs(rectCorners(s), true);
     case 'circle':
       return [{ type: 'circle', c: s.center, r: s.radius }];
+    case 'arc':
+      return [{ type: 'arc', c: s.center, r: s.radius, startDeg: s.startDeg, sweepDeg: s.sweepDeg }];
     case 'polyline':
       return segs(s.points, false);
   }

@@ -7,3 +7,4 @@ export * from './viewport';
 export * from './coords';
 export * from './units';
 export * from './intersect';
+export * from './arc';

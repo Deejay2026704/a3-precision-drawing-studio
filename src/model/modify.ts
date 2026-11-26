@@ -3,6 +3,8 @@ import { lineLineIntersection, lineParamsWithPrimitive, mirrorPoint } from '../g
 import { add, distance, dot, EPSILON, length, mul, sub, vec, type Vec2 } from '../geometry/vec';
 import { shapePrimitives } from './anchors';
 import { retargetAnchors } from './dimensions';
+import { arcEnd, normalizeArc } from './arcs';
+import { trimCurve, trimCurvePreview } from './curves';
 import { rectCorners } from './shapes';
 import type { DrawingDocument, LineShape, PolylineShape, RectShape, Shape, ShapeId } from './types';
 
@@ -36,7 +38,11 @@ function cuttingParams(doc: DrawingDocument, l: LineShape): number[] {
 function asLine(doc: DrawingDocument, id: ShapeId, op: string): LineShape | string {
   const s = doc.shapes.find((x) => x.id === id);
   if (!s) return 'Object not found';
-  if (s.kind !== 'line') return `${op} works on lines. Rectangles, circles and polylines act as boundaries but cannot be ${op === 'Trim' ? 'trimmed' : 'extended'} yet.`;
+  if (s.kind !== 'line') {
+    return op === 'Trim'
+      ? 'Trim works on lines, circles and arcs. Rectangles and polylines act as cutting edges but cannot be trimmed.'
+      : 'Extend works on lines. Other objects act as boundaries but cannot be extended.';
+  }
   if (distance(s.start, s.end) < MIN_LEN) return `Cannot ${op.toLowerCase()} a zero-length line`;
   return s;
 }
@@ -93,6 +99,22 @@ export function trimLine(doc: DrawingDocument, lineId: ShapeId, pick: Vec2, newI
   // Dimensions linked to the original END follow it onto the new piece.
   const dimensions = retargetAnchors(doc.dimensions, { shapeId: l.id, key: 'end' }, { shapeId: second.id, key: 'end' });
   return { ok: true, doc: { ...doc, shapes, dimensions }, selection: [first.id, second.id], message: 'Trimmed middle of line (split into two lines)' };
+}
+
+/** Trim any trimmable object (line, circle → arc, arc) at the cutting edges around `pick`. */
+export function trimShape(doc: DrawingDocument, id: ShapeId, pick: Vec2, newId: () => ShapeId): EditResult {
+  const s = doc.shapes.find((x) => x.id === id);
+  if (s && (s.kind === 'circle' || s.kind === 'arc')) return trimCurve(doc, id, pick, newId);
+  return trimLine(doc, id, pick, newId);
+}
+
+/** The piece a trim at `pick` would remove, as a shape (line segment or arc), or null if refused. */
+export function trimPreviewShape(doc: DrawingDocument, id: ShapeId, pick: Vec2): Shape | null {
+  const s = doc.shapes.find((x) => x.id === id);
+  if (!s) return null;
+  if (s.kind === 'circle' || s.kind === 'arc') return trimCurvePreview(doc, id, pick);
+  const seg = trimPreview(doc, id, pick);
+  return seg ? { ...s, id: '__trim__', kind: 'line', start: seg[0], end: seg[1] } as Shape : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +206,13 @@ export function offsetShape(doc: DrawingDocument, shapeId: ShapeId, dist: number
       created = { ...s, id: newId(), start: add(s.start, v), end: add(s.end, v) };
       break;
     }
+    case 'arc': {
+      const outside = distance(side, s.center) > s.radius;
+      const r = outside ? s.radius + dist : s.radius - dist;
+      if (r <= MIN_LEN) return fail(`Offset of ${dist} mm inside an arc of radius ${s.radius} mm is not possible`);
+      created = { ...s, id: newId(), radius: r };
+      break;
+    }
     case 'circle': {
       const outside = distance(side, s.center) > s.radius;
       const r = outside ? s.radius + dist : s.radius - dist;
@@ -230,6 +259,12 @@ export function mirrorShape<S extends Shape>(s: S, a: Vec2, b: Vec2): S {
       return { ...s, start: m(s.start), end: m(s.end) };
     case 'circle':
       return { ...s, center: m(s.center) };
+    case 'arc': {
+      // Reflection reverses orientation: the image of the END becomes the new start.
+      const c = m(s.center);
+      const e = m(arcEnd(s));
+      return normalizeArc({ ...s, center: c, startDeg: (Math.atan2(e.y - c.y, e.x - c.x) * 180) / Math.PI }) as S;
+    }
     case 'polyline':
       return { ...s, points: s.points.map(m) };
     case 'rect': {

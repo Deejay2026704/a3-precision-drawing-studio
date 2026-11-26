@@ -6,6 +6,7 @@ import {
   type Primitive,
 } from '../geometry/intersect';
 import { snapValue } from '../geometry/units';
+import { pointOnArc } from '../geometry/arc';
 import { distance, vec, type Vec2 } from '../geometry/vec';
 import { shapeKeyPoints, shapePrimitives } from './anchors';
 import { distanceToShape } from './hitTest';
@@ -142,8 +143,11 @@ export function findSnap(cursor: Vec2, settings: SnapSettings, ctx: SnapContext)
     if (base) {
       for (const { id, prim } of prims) {
         if (k.perpendicular) for (const p of perpendicularFeet(base, prim)) consider({ point: p, kind: 'perpendicular', shapeIds: [id] });
-        if (k.tangent && prim.type === 'circle') {
-          for (const p of tangentPoints(base, prim.c, prim.r)) consider({ point: p, kind: 'tangent', shapeIds: [id] });
+        if (k.tangent && prim.type !== 'seg') {
+          for (const p of tangentPoints(base, prim.c, prim.r)) {
+            if (prim.type === 'arc' && !pointOnArc(prim, p)) continue;
+            consider({ point: p, kind: 'tangent', shapeIds: [id] });
+          }
         }
       }
     }

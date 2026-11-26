@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { vec } from '../src/geometry/vec';
 import { addDimensions } from '../src/model/document';
 import { applyDimensionGrip, createLinearDimension, createRadialDimension } from '../src/model/dimensions';
-import { extendLine, mirrorShapes, offsetShape, trimLine, type EditResult } from '../src/model/modify';
+import { extendLine, mirrorShapes, offsetShape, trimLine, trimShape, type EditResult } from '../src/model/modify';
+import { chamferLines, filletLines } from '../src/model/curves';
 import { createCircle, createLine } from '../src/model/shapes';
 import { DEFAULT_DIMENSION_STYLE as S } from '../src/model/types';
 import { createInitialState, editorReducer, type EditorAction, type EditorState } from '../src/ui/state/editorReducer';
@@ -42,6 +43,9 @@ describe('undo / redo for every Milestone 2 operation', () => {
   roundTrip('offset', (s) => offsetShape(s.doc, 'C', 5, vec(0, 0), newId));
   roundTrip('mirror (copy)', (s) => mirrorShapes(s.doc, ['L', 'C'], vec(0, 200), vec(10, 200), true, newId));
   roundTrip('mirror (replace)', (s) => mirrorShapes(s.doc, ['C'], vec(0, 200), vec(10, 200), false, newId));
+  roundTrip('trim circle → arc', (s) => trimShape({ ...s.doc, shapes: [...s.doc.shapes, createLine('Hz', vec(0, 60), vec(100, 60))] }, 'C', vec(50, 80), newId));
+  roundTrip('fillet', (s) => filletLines(s.doc, 'L', vec(80, 0), 'A', vec(30, 8), 5, newId));
+  roundTrip('chamfer', (s) => chamferLines(s.doc, 'L', vec(80, 0), 'A', vec(30, 8), 4, 4, newId));
   roundTrip('add dimension', (s) => {
     const d = createLinearDimension(s.doc, 'D', 'aligned', { kind: 'shape', shapeId: 'L', key: 'start' }, { kind: 'shape', shapeId: 'L', key: 'end' }, vec(50, 20), S);
     if (!d.ok) throw new Error(d.message);

@@ -2,7 +2,7 @@ import { normalizeAngle } from '../geometry/angles';
 import { formatNumber } from '../geometry/units';
 import { distance, vec, type Vec2 } from '../geometry/vec';
 import { constraintShapeIds, isEditable } from './layers';
-import { CONSTRAINT_LABELS, type CircleShape, type Constraint, type ConstraintKind, type DrawingDocument, type LineShape, type PointRef, type Shape, type ShapeId } from './types';
+import { CONSTRAINT_LABELS, type ArcShape, type CircleShape, type Constraint, type ConstraintKind, type DrawingDocument, type LineShape, type PointRef, type Shape, type ShapeId } from './types';
 
 /**
  * DRIVING geometric constraints and a numerical solver.
@@ -42,10 +42,16 @@ export const CONSTRAINT_GLYPHS: Record<ConstraintKind, string> = {
   'fixed-length': 'L',
   'fixed-angle': '∠',
   'fixed-position': '⊕',
+  'fixed-radius': 'R',
+  angle: '∡',
 };
 
+type RoundShape = CircleShape | ArcShape;
+const isRound = (s: Shape | undefined): s is RoundShape => !!s && (s.kind === 'circle' || s.kind === 'arc');
+const unknownsOf = (s: LineShape | RoundShape) => (s.kind === 'line' ? 4 : s.kind === 'circle' ? 3 : 5);
+
 /** Shape kinds the constraint system supports. Rectangles and polylines are not constrainable. */
-export const isConstrainable = (s: Shape): s is LineShape | CircleShape => s.kind === 'line' || s.kind === 'circle';
+export const isConstrainable = (s: Shape): s is LineShape | RoundShape => s.kind === 'line' || s.kind === 'circle' || s.kind === 'arc';
 
 // ---------------------------------------------------------------------------
 // Validation of references
@@ -67,7 +73,8 @@ function needPoint(doc: Pick<DrawingDocument, 'shapes'>, p: PointRef): string | 
   if (!s) return 'references an object that no longer exists';
   if (s.kind === 'line' && (p.key === 'start' || p.key === 'end' || p.key === 'mid')) return null;
   if (s.kind === 'circle' && p.key === 'center') return null;
-  return 'needs a line end/midpoint or a circle centre';
+  if (s.kind === 'arc') return null; // start, end, mid, center
+  return 'needs a line or arc end/midpoint, or a circle/arc centre';
 }
 
 /** Why a constraint is not valid for the document (null = valid). */
@@ -89,8 +96,8 @@ export function constraintProblem(doc: Pick<DrawingDocument, 'shapes'>, c: Const
       const a = find(doc, c.a);
       const b = find(doc, c.b);
       if (!a || !b) return 'references an object that no longer exists';
-      if (b.kind !== 'circle' || (a.kind !== 'line' && a.kind !== 'circle')) return 'needs a line and a circle, or two circles';
-      if (b.radius < MIN_SIZE || (a.kind === 'circle' && a.radius < MIN_SIZE)) return 'cannot use a zero-radius circle';
+      if (!isRound(b) || (a.kind !== 'line' && !isRound(a))) return 'needs a line and a circle/arc, or two circles/arcs';
+      if (b.radius < MIN_SIZE || (isRound(a) && a.radius < MIN_SIZE)) return 'cannot use a zero-radius circle';
       if (a.kind === 'line' && lineLen(a) < MIN_SIZE) return 'cannot use a zero-length line';
       return null;
     }
@@ -100,6 +107,16 @@ export function constraintProblem(doc: Pick<DrawingDocument, 'shapes'>, c: Const
       return needPoint(doc, c.p) ?? needPoint(doc, c.q);
     case 'fixed-position':
       return needPoint(doc, c.p);
+    case 'fixed-radius': {
+      const s = find(doc, c.shape);
+      if (!s) return 'references an object that no longer exists';
+      if (!isRound(s)) return 'needs a circle or an arc';
+      return c.value > 0 ? null : 'radius must be greater than zero';
+    }
+    case 'angle':
+      if (c.a === c.b) return 'needs two different lines';
+      if (!(c.value >= 0 && c.value <= 180)) return 'angle must be between 0° and 180°';
+      return needLine(doc, c.a) ?? needLine(doc, c.b);
   }
 }
 
@@ -180,11 +197,22 @@ function residuals(c: Constraint, g: GeoWithKind): number[] {
       const p = g.point(c.p);
       return [p.x - c.x, p.y - c.y];
     }
+    case 'fixed-radius':
+      return [g.circle(c.shape).r - c.value];
+    case 'angle': {
+      const A = g.line(c.a);
+      const B = g.line(c.b);
+      const u = unitOf(A.s, A.e);
+      const v = unitOf(B.s, B.e);
+      if (!u || !v) return [DEGENERATE];
+      // Unsigned angle between the directions (radians), compared with the driving value.
+      return [Math.atan2(Math.abs(u.x * v.y - u.y * v.x), u.x * v.x + u.y * v.y) - (c.value * Math.PI) / 180];
+    }
   }
 }
 
-// `tangent` needs to know whether `a` is a line or a circle.
-type GeoWithKind = Geo & { kindOf?: (id: ShapeId) => 'line' | 'circle' };
+// `tangent` needs to know whether `a` is a line or a round shape (circle / arc).
+type GeoWithKind = Geo & { kindOf?: (id: ShapeId) => 'line' | 'circle' | 'arc' };
 function isLineRef(g: GeoWithKind, id: ShapeId): boolean {
   return g.kindOf ? g.kindOf(id) === 'line' : true;
 }
@@ -196,19 +224,29 @@ function docGeo(doc: Pick<DrawingDocument, 'shapes'>): GeoWithKind {
     return { s: s.start, e: s.end };
   };
   const circle = (id: ShapeId) => {
-    const s = map.get(id) as CircleShape;
+    const s = map.get(id) as RoundShape;
     return { c: s.center, r: s.radius };
   };
   return {
     line,
     circle,
     point: (p) => pointOf(map.get(p.shapeId)!, p.key),
-    kindOf: (id) => (map.get(id)?.kind === 'circle' ? 'circle' : 'line'),
+    kindOf: (id) => {
+      const k = map.get(id)?.kind;
+      return k === 'circle' || k === 'arc' ? k : 'line';
+    },
   };
+}
+
+const onCircle = (c: Vec2, r: number, deg: number) => vec(c.x + r * Math.cos((deg * Math.PI) / 180), c.y + r * Math.sin((deg * Math.PI) / 180));
+function arcPoint(c: Vec2, r: number, start: number, sweep: number, key: PointRef['key']): Vec2 {
+  if (key === 'center') return c;
+  return onCircle(c, r, key === 'start' ? start : key === 'end' ? start + sweep : start + sweep / 2);
 }
 
 function pointOf(s: Shape, key: PointRef['key']): Vec2 {
   if (s.kind === 'circle') return s.center;
+  if (s.kind === 'arc') return arcPoint(s.center, s.radius, s.startDeg, s.sweepDeg, key);
   const l = s as LineShape;
   if (key === 'start') return l.start;
   if (key === 'end') return l.end;
@@ -241,7 +279,7 @@ export function constraintStatuses(doc: Pick<DrawingDocument, 'shapes' | 'constr
 // ---------------------------------------------------------------------------
 
 interface SlotInfo {
-  shape: LineShape | CircleShape;
+  shape: LineShape | RoundShape;
   offset: number;
   free: boolean;
 }
@@ -296,7 +334,7 @@ export function solveConstraints(doc: DrawingDocument, opts: SolveOptions = {}):
   // EXACTLY fixed; only if that cannot satisfy the constraints are radii allowed to change.
   const fixedRadii = solveOnce(doc, opts, false);
   if (fixedRadii.ok) return fixedRadii;
-  const hasCircles = activeConstraints(doc).some((c) => constraintShapeIds(c).some((id) => find(doc, id)?.kind === 'circle'));
+  const hasCircles = activeConstraints(doc).some((c) => constraintShapeIds(c).some((id) => isRound(find(doc, id))));
   return hasCircles ? solveOnce(doc, opts, true) : fixedRadii;
 }
 
@@ -311,23 +349,24 @@ function solveOnce(doc: DrawingDocument, opts: SolveOptions, radiiFree: boolean)
   for (const c of cons) {
     for (const id of constraintShapeIds(c)) {
       if (slots.has(id)) continue;
-      const s = find(doc, id) as LineShape | CircleShape;
+      const s = find(doc, id) as LineShape | RoundShape;
       slots.set(id, { shape: s, offset: n, free: isEditable(doc, s) });
-      n += s.kind === 'line' ? 4 : 3;
+      n += unknownsOf(s);
     }
   }
   const x0 = new Array<number>(n);
   for (const { shape: s, offset: o } of slots.values()) {
     if (s.kind === 'line') [x0[o], x0[o + 1], x0[o + 2], x0[o + 3]] = [s.start.x, s.start.y, s.end.x, s.end.y];
-    else [x0[o], x0[o + 1], x0[o + 2]] = [s.center.x, s.center.y, s.radius];
+    else if (s.kind === 'circle') [x0[o], x0[o + 1], x0[o + 2]] = [s.center.x, s.center.y, s.radius];
+    else [x0[o], x0[o + 1], x0[o + 2], x0[o + 3], x0[o + 4]] = [s.center.x, s.center.y, s.radius, s.startDeg, s.sweepDeg];
   }
   const freeIdx: number[] = [];
   const weight: number[] = [];
   for (const { shape, offset, free } of slots.values()) {
     if (!free) continue;
     const w = opts.preferred?.has(shape.id) ? 1e4 : 1;
-    for (let k = 0; k < (shape.kind === 'line' ? 4 : 3); k++) {
-      if (shape.kind === 'circle' && k === 2 && !radiiFree) continue;
+    for (let k = 0; k < unknownsOf(shape); k++) {
+      if (shape.kind !== 'line' && k === 2 && !radiiFree) continue;
       freeIdx.push(offset + k);
       weight.push(w);
     }
@@ -345,10 +384,14 @@ function solveOnce(doc: DrawingDocument, opts: SolveOptions, radiiFree: boolean)
     return {
       line,
       circle,
-      kindOf: (id) => slots.get(id)!.shape.kind as 'line' | 'circle',
+      kindOf: (id) => slots.get(id)!.shape.kind as 'line' | 'circle' | 'arc',
       point: (p) => {
         const sl = slots.get(p.shapeId)!;
         if (sl.shape.kind === 'circle') return circle(p.shapeId).c;
+        if (sl.shape.kind === 'arc') {
+          const o = sl.offset;
+          return arcPoint(vec(x[o], x[o + 1]), x[o + 2], x[o + 3], x[o + 4], p.key);
+        }
         const L = line(p.shapeId);
         return p.key === 'start' ? L.s : p.key === 'end' ? L.e : vec((L.s.x + L.e.x) / 2, (L.s.y + L.e.y) / 2);
       },
@@ -423,6 +466,8 @@ function solveOnce(doc: DrawingDocument, opts: SolveOptions, radiiFree: boolean)
       if (before >= MIN_SIZE && after < MIN_SIZE) return unchanged(false, perConstraint(x0), 'The constraints would collapse a line to zero length');
     } else if (x[o + 2] < MIN_SIZE) {
       return unchanged(false, perConstraint(x0), 'The constraints would give a circle zero or negative radius');
+    } else if (s.kind === 'arc' && !(x[o + 4] > 1e-6 && x[o + 4] < 360 - 1e-6)) {
+      return unchanged(false, perConstraint(x0), 'The constraints would collapse an arc (or turn it into a full circle)');
     }
   }
 
@@ -434,9 +479,11 @@ function solveOnce(doc: DrawingDocument, opts: SolveOptions, radiiFree: boolean)
     const next: Shape =
       s.kind === 'line'
         ? { ...s, start: vec(x[o], x[o + 1]), end: vec(x[o + 2], x[o + 3]) }
-        : { ...s, center: vec(x[o], x[o + 1]), radius: x[o + 2] };
+        : s.kind === 'circle'
+          ? { ...s, center: vec(x[o], x[o + 1]), radius: x[o + 2] }
+          : { ...s, center: vec(x[o], x[o + 1]), radius: x[o + 2], startDeg: ((x[o + 3] % 360) + 360) % 360, sweepDeg: x[o + 4] };
     // Changes below NOISE are floating-point noise: the object is left exactly as it was.
-    const count = s.kind === 'line' ? 4 : 3;
+    const count = unknownsOf(s);
     let changed = false;
     for (let q = 0; q < count; q++) if (Math.abs(x[o + q] - x0[o + q]) > NOISE) changed = true;
     if (changed) {
@@ -456,7 +503,14 @@ export type ConstraintResult = { ok: true; doc: DrawingDocument; message: string
 
 export function describeConstraint(doc: Pick<DrawingDocument, 'shapes'>, c: Constraint): string {
   void doc; // reserved for object names
-  const v = c.kind === 'fixed-length' ? ` ${formatNumber(c.value)} mm` : c.kind === 'fixed-angle' ? ` ${formatNumber(c.value)}°` : c.kind === 'fixed-position' ? ` (${formatNumber(c.x)}, ${formatNumber(c.y)})` : '';
+  const v =
+    c.kind === 'fixed-length' || c.kind === 'fixed-radius'
+      ? ` ${formatNumber(c.value)} mm`
+      : c.kind === 'fixed-angle' || c.kind === 'angle'
+        ? ` ${formatNumber(c.value)}°`
+        : c.kind === 'fixed-position'
+          ? ` (${formatNumber(c.x)}, ${formatNumber(c.y)})`
+          : '';
   return `${CONSTRAINT_LABELS[c.kind]}${v}`;
 }
 
@@ -495,7 +549,8 @@ export function addConstraint(doc: DrawingDocument, c: Constraint): ConstraintRe
 /** Change a constraint (value / suppression). Refused, document unchanged, if it cannot be satisfied. */
 export function updateConstraint(doc: DrawingDocument, c: Constraint): ConstraintResult {
   if (!doc.constraints.some((x) => x.id === c.id)) return { ok: false, message: 'Constraint not found' };
-  if (c.kind === 'fixed-length' && !(c.value > 0)) return { ok: false, message: 'Length must be greater than zero' };
+  if ((c.kind === 'fixed-length' || c.kind === 'fixed-radius') && !(c.value > 0)) return { ok: false, message: `${c.kind === 'fixed-length' ? 'Length' : 'Radius'} must be greater than zero` };
+  if (c.kind === 'angle' && !(c.value >= 0 && c.value <= 180)) return { ok: false, message: 'Angle must be between 0° and 180°' };
   const next = { ...doc, constraints: doc.constraints.map((x) => (x.id === c.id ? c : x)) };
   if (c.suppressed) return { ok: true, doc: next, message: `${describeConstraint(doc, c)} suppressed` };
   const r = solveConstraints(next);
@@ -506,7 +561,7 @@ export function updateConstraint(doc: DrawingDocument, c: Constraint): Constrain
 /** Build a constraint of `kind` from selected shapes (null + reason if the selection does not fit). */
 export function constraintFromSelection(kind: ConstraintKind, shapes: readonly Shape[], id: ShapeId): Constraint | string {
   const lines = shapes.filter((s): s is LineShape => s.kind === 'line');
-  const circles = shapes.filter((s): s is CircleShape => s.kind === 'circle');
+  const circles = shapes.filter((s): s is RoundShape => isRound(s));
   const base = { id, suppressed: false };
   switch (kind) {
     case 'horizontal':
@@ -529,11 +584,22 @@ export function constraintFromSelection(kind: ConstraintKind, shapes: readonly S
       if (shapes.length !== 2 || lines.length !== 2) return 'Select exactly two lines';
       return { ...base, kind, a: lines[0].id, b: lines[1].id };
     case 'tangent': {
-      if (shapes.length !== 2 || circles.length === 0) return 'Select a line and a circle, or two circles';
+      if (shapes.length !== 2 || circles.length === 0) return 'Select a line and a circle/arc, or two circles/arcs';
       if (lines.length === 1) return { ...base, kind, a: lines[0].id, b: circles[0].id, internal: false };
       const [a, b] = circles;
       const internal = distance(a.center, b.center) < Math.max(a.radius, b.radius);
       return { ...base, kind, a: a.id, b: b.id, internal };
+    }
+    case 'fixed-radius':
+      if (shapes.length !== 1 || circles.length !== 1) return 'Select exactly one circle or arc';
+      return { ...base, kind, shape: circles[0].id, value: circles[0].radius };
+    case 'angle': {
+      if (shapes.length !== 2 || lines.length !== 2) return 'Select exactly two lines';
+      const [a, b] = lines;
+      const u = vec(a.end.x - a.start.x, a.end.y - a.start.y);
+      const v = vec(b.end.x - b.start.x, b.end.y - b.start.y);
+      const value = (Math.atan2(Math.abs(u.x * v.y - u.y * v.x), u.x * v.x + u.y * v.y) * 180) / Math.PI;
+      return { ...base, kind, a: a.id, b: b.id, value };
     }
     case 'coincident':
     case 'fixed-position':
@@ -548,11 +614,12 @@ export function constraintMarkerAnchors(doc: Pick<DrawingDocument, 'shapes'>, c:
     if (!s) return null;
     if (s.kind === 'line') return vec((s.start.x + s.end.x) / 2, (s.start.y + s.end.y) / 2);
     if (s.kind === 'circle') return vec(s.center.x, s.center.y + s.radius);
+    if (s.kind === 'arc') return arcPoint(s.center, s.radius, s.startDeg, s.sweepDeg, 'mid');
     return null;
   };
   const pt = (p: PointRef): Vec2 | null => {
     const s = find(doc, p.shapeId);
-    return s && (s.kind === 'line' || s.kind === 'circle') ? pointOf(s, p.key) : null;
+    return s && (s.kind === 'line' || isRound(s)) ? pointOf(s, p.key) : null;
   };
   const list = c.kind === 'coincident' ? [pt(c.p)] : c.kind === 'fixed-position' ? [pt(c.p)] : constraintShapeIds(c).map(at);
   return list.filter((p): p is Vec2 => p !== null);

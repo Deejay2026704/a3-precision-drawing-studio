@@ -357,7 +357,7 @@ try {
   check('after Save As the unsaved indicator disappears', (await win.locator('[data-testid=unsaved-indicator]').count()) === 0);
   const saved = JSON.parse(readFileSync(proj, 'utf8'));
   const live = await st();
-  check('saved file: format 3 with layers, constraints, dimensions, orientation', saved.formatVersion === 3 && saved.layers.length === 2 && saved.constraints.length === live.doc.constraints.length && saved.dimensions.length === live.doc.dimensions.length && saved.page.orientation === 'landscape');
+  check('saved file: current format (4) with layers, constraints, dimensions, orientation', saved.formatVersion === 4 && saved.layers.length === 2 && saved.constraints.length === live.doc.constraints.length && saved.dimensions.length === live.doc.dimensions.length && saved.page.orientation === 'landscape');
   check('saved file: layer properties and display preferences', saved.layers[1].name === 'Walls' && saved.layers[1].locked === true && saved.layers[1].color === '#ff0000' && saved.settings.display.gridSpacingMm === 25 && saved.settings.activeLayerId === walls.id);
 
   // replacing a modified drawing asks first
@@ -409,7 +409,7 @@ try {
   await win.keyboard.press('Control+s');
   await win.click('[data-testid=dialog-upgrade-save]');
   await win.waitForTimeout(300);
-  check('"Upgrade and save" writes format 3', JSON.parse(readFileSync(old, 'utf8')).formatVersion === 3);
+  check('"Upgrade and save" writes the current format (4)', JSON.parse(readFileSync(old, 'utf8')).formatVersion === 4);
 
   // malformed / newer files: useful error, current drawing untouched
   const keep = JSON.stringify((await st()).doc);

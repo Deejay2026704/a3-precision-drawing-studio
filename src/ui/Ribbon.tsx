@@ -77,6 +77,8 @@ const SELECTION_CONSTRAINTS: { kind: ConstraintKind; tip: string }[] = [
   { kind: 'equal-length', tip: 'Make the two selected lines equal in length' },
   { kind: 'fixed-length', tip: 'Fix the selected line at its current length (editable in Properties)' },
   { kind: 'fixed-angle', tip: 'Fix the selected line at its current angle (editable in Properties)' },
+  { kind: 'angle', tip: 'Fix the angle between the two selected lines (editable in Properties)' },
+  { kind: 'fixed-radius', tip: 'Fix the radius of the selected circle or arc (editable in Properties)' },
 ];
 
 interface Props {
@@ -135,6 +137,7 @@ export function Ribbon({ tab, state, dispatch, zoom, view, edit, constrain }: Pr
             {tool('line', 'line', 'Line', 'L')}
             {tool('rect', 'rect', 'Rectangle', 'R')}
             {tool('circle', 'circle', 'Circle', 'C')}
+            {tool('arc', 'arc', 'Arc', 'A', 'click start, a point on the arc, end – or create by numbers')}
             {tool('freehand', 'freehand', 'Freehand', 'F')}
           </Group>
           <Group title="Pen (new objects)">
@@ -166,9 +169,17 @@ export function Ribbon({ tab, state, dispatch, zoom, view, edit, constrain }: Pr
             {tool('extend', 'extend', 'Extend', 'E', 'click near a line end to extend it to the next object')}
             {tool('offset', 'offset', 'Offset', 'O', 'click an object, then the side: creates a parallel copy')}
             {tool('mirror', 'mirror', 'Mirror', 'M', 'select objects, then click two points on the mirror line')}
+            {tool('fillet', 'fillet', 'Fillet', '', 'round the corner between two lines with an arc (radius below; 0 = sharp corner)')}
+            {tool('chamfer', 'chamfer', 'Chamfer', '', 'cut the corner between two lines (distance below; 0 = sharp corner)')}
             <div className="ribbon-stack">
               <div className="ribbon-number" title="Offset distance in drawing millimetres">
                 <NumberField label="Offset" testId="offset-distance" min={0.000001} value={state.offsetDistanceMm} onCommit={(mm) => dispatch({ type: 'setOffsetDistance', mm })} />
+              </div>
+              <div className="ribbon-number" title="Fillet radius in drawing millimetres (0 = sharp corner)">
+                <NumberField label="Fillet R" testId="fillet-radius" min={0} value={state.filletRadiusMm} onCommit={(mm) => dispatch({ type: 'setFilletRadius', mm })} />
+              </div>
+              <div className="ribbon-number" title="Chamfer distance along each line, drawing millimetres">
+                <NumberField label="Chamfer" testId="chamfer-distance" min={0} value={state.chamferDistanceMm} onCommit={(mm) => dispatch({ type: 'setChamferDistance', mm })} />
               </div>
               <label className="ribbon-field" title="Mirror makes a copy (on) or moves the originals (off)">
                 <input type="checkbox" data-testid="mirror-keep" checked={state.mirrorKeepSource} onChange={(e) => dispatch({ type: 'setMirrorKeepSource', keep: e.target.checked })} />
@@ -289,7 +300,7 @@ export function Ribbon({ tab, state, dispatch, zoom, view, edit, constrain }: Pr
               <span className="ribbon-note constraint-note" title="Driving constraints CONTROL geometry. Dimensions (Annotate tab) are reference dimensions: they only report measurements.">
                 Constraints control geometry.
                 <br />
-                Lines and circles only.
+                Lines, circles and arcs.
               </span>
             </div>
             <div className="ribbon-group-title">About</div>

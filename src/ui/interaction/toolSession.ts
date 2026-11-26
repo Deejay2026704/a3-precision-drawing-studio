@@ -8,10 +8,12 @@ import {
   type DimResult,
 } from '../../model/dimensions';
 import { distanceToShape } from '../../model/hitTest';
-import { extendLine, mirrorShape, mirrorShapes, offsetShape, trimLine, trimPreview, type EditResult } from '../../model/modify';
+import { extendLine, mirrorShape, mirrorShapes, offsetShape, trimPreviewShape, trimShape, type EditResult } from '../../model/modify';
+import { chamferLines, filletLines } from '../../model/curves';
 import type { SnapResult } from '../../model/snap';
-import { createLine } from '../../model/shapes';
-import type { DimAnchor, Dimension, DimensionStyle, DrawingDocument, Shape, ShapeId, ShapeKind } from '../../model/types';
+import { createArc, createLine } from '../../model/shapes';
+import { arcThroughPoints } from '../../geometry/arc';
+import type { DimAnchor, Dimension, DimensionStyle, DrawingDocument, Shape, ShapeId, ShapeKind, ShapeStyle } from '../../model/types';
 import type { ConstraintToolId, DimensionToolId, ModifyToolId } from '../state/editorReducer';
 import { addConstraint } from '../../model/constraints';
 import { shapeKeyPoints } from '../../model/anchors';
@@ -22,7 +24,7 @@ import type { PointRef } from '../../model/types';
  * The canvas feeds it snapped clicks; it returns either "continue" (with a prompt),
  * a document to commit (one undo step), or a refusal message. No DOM, no React.
  */
-export type SessionTool = ModifyToolId | DimensionToolId | ConstraintToolId;
+export type SessionTool = 'arc' | ModifyToolId | DimensionToolId | ConstraintToolId;
 
 export interface ToolSession {
   readonly tool: SessionTool;
@@ -54,6 +56,10 @@ export interface ToolInput {
   readonly canEdit?: (s: Shape) => boolean;
   /** Objects that are visible (may be measured or snapped to). Default: all. */
   readonly canSee?: (s: Shape) => boolean;
+  /** Pen for new objects (arc tool). */
+  readonly drawStyle?: ShapeStyle;
+  readonly filletRadiusMm?: number;
+  readonly chamferDistanceMm?: number;
 }
 
 export type ToolStep =
@@ -93,7 +99,7 @@ const LINEAR: Record<string, 'aligned' | 'horizontal' | 'vertical'> = {
 export function pickPointRef(doc: DrawingDocument, p: Vec2, tolerance: number, allow: (s: Shape) => boolean = () => true): PointRef | null {
   let best: { ref: PointRef; d: number } | null = null;
   for (const s of doc.shapes) {
-    if ((s.kind !== 'line' && s.kind !== 'circle') || !allow(s)) continue;
+    if ((s.kind !== 'line' && s.kind !== 'circle' && s.kind !== 'arc') || !allow(s)) continue;
     for (const kp of shapeKeyPoints(s)) {
       if (kp.key !== 'start' && kp.key !== 'end' && kp.key !== 'mid' && kp.key !== 'center') continue;
       const d = distance(kp.point, p);
@@ -110,11 +116,38 @@ export function toolClick(session: ToolSession, input: ToolInput): ToolStep {
   const canSee = input.canSee ?? (() => true);
 
   switch (session.tool) {
+    case 'arc': {
+      const pts = [...session.points, point];
+      if (pts.length >= 2 && distance(pts[pts.length - 1], pts[pts.length - 2]) < 1e-9) {
+        return { kind: 'error', session, message: 'That point coincides with the previous one' };
+      }
+      if (pts.length < 3) {
+        return { kind: 'continue', session: { ...session, points: pts }, prompt: pts.length === 1 ? 'Arc: click a point on the arc' : 'Arc: click the end point' };
+      }
+      const g = arcThroughPoints(pts[0], pts[1], pts[2]);
+      if (!g) return { kind: 'error', session: { ...session, points: pts.slice(0, 2) }, message: 'The three points are in a straight line – pick a different end point' };
+      const arc = createArc(input.newId(), g.c, g.r, g.startDeg, g.sweepDeg, input.drawStyle);
+      return { kind: 'commit', session: reset, doc: { ...doc, shapes: [...doc.shapes, arc] }, selection: [arc.id], message: `Arc created – radius ${formatNumber(g.r)} mm, ${formatNumber(g.sweepDeg)}°` };
+    }
     case 'trim':
     case 'extend': {
       const s = pickShape(doc, raw, tolerance, undefined, canEdit);
-      if (!s) return { kind: 'error', session, message: `Click on a line to ${session.tool} (objects on locked or hidden layers cannot be changed)` };
-      return fromEdit(session, session.tool === 'trim' ? trimLine(doc, s.id, raw, input.newId) : extendLine(doc, s.id, raw));
+      if (!s) return { kind: 'error', session, message: `Click on ${session.tool === 'trim' ? 'a line, circle or arc to trim' : 'a line to extend'} (objects on locked or hidden layers cannot be changed)` };
+      return fromEdit(session, session.tool === 'trim' ? trimShape(doc, s.id, raw, input.newId) : extendLine(doc, s.id, raw));
+    }
+
+    case 'fillet':
+    case 'chamfer': {
+      const l = pickShape(doc, raw, tolerance, ['line'], canEdit);
+      if (!l) return { kind: 'error', session, message: 'Click on a line (on the side you want to keep)' };
+      if (session.picks.length === 0) {
+        return { kind: 'continue', session: { ...session, picks: [l.id], points: [raw] }, selection: [l.id], prompt: `${session.tool === 'fillet' ? 'Fillet' : 'Chamfer'}: click the second line on the side to keep` };
+      }
+      const r =
+        session.tool === 'fillet'
+          ? filletLines(doc, session.picks[0], session.points[0], l.id, raw, input.filletRadiusMm ?? 10, input.newId)
+          : chamferLines(doc, session.picks[0], session.points[0], l.id, raw, input.chamferDistanceMm ?? 5, input.chamferDistanceMm ?? 5, input.newId);
+      return r.ok ? fromEdit(reset, r) : { kind: 'error', session: reset, message: r.message };
     }
 
     case 'offset': {
@@ -164,8 +197,8 @@ export function toolClick(session: ToolSession, input: ToolInput): ToolStep {
 
     case 'dim-radius':
     case 'dim-diameter': {
-      const c = pickShape(doc, raw, tolerance, ['circle'], canSee);
-      if (!c) return { kind: 'error', session, message: 'Click on a circle' };
+      const c = pickShape(doc, raw, tolerance, ['circle', 'arc'], canSee);
+      if (!c) return { kind: 'error', session, message: 'Click on a circle or an arc' };
       return fromDim(session, doc, createRadialDimension(doc, input.newId(), session.tool === 'dim-radius' ? 'radius' : 'diameter', c.id, raw, input.dimStyle), 'Dimension added');
     }
 
@@ -188,7 +221,7 @@ export function toolClick(session: ToolSession, input: ToolInput): ToolStep {
     case 'con-coincident':
     case 'con-fixed-position': {
       const ref = pickPointRef(doc, raw, tolerance, canSee);
-      if (!ref) return { kind: 'error', session, message: 'Click on a line end, line midpoint or circle centre' };
+      if (!ref) return { kind: 'error', session, message: 'Click on a line or arc end, a midpoint, or a circle/arc centre' };
       const refs = [...(session.refs ?? []), ref];
       if (session.tool === 'con-coincident' && refs.length < 2) {
         return { kind: 'continue', session: { ...session, refs }, prompt: 'Coincident: click the second point (on another object)' };
@@ -208,23 +241,52 @@ export function toolClick(session: ToolSession, input: ToolInput): ToolStep {
 export interface ToolPreview {
   readonly shapes: readonly Shape[];
   readonly dimensions: readonly Dimension[];
-  /** Segments that the click would remove (trim) – drawn as a warning. */
-  readonly removed: readonly (readonly [Vec2, Vec2])[];
+  /** Pieces that the click would remove (trim) – drawn as a warning. */
+  readonly removedShapes: readonly Shape[];
   /** Short live readout. */
   readonly feedback: string | null;
 }
 
-const EMPTY: ToolPreview = { shapes: [], dimensions: [], removed: [], feedback: null };
+const EMPTY: ToolPreview = { shapes: [], dimensions: [], removedShapes: [], feedback: null };
 
 /** What the next click would do, for live display. Never modifies the document. */
 export function toolPreview(session: ToolSession, input: ToolInput): ToolPreview {
   const { doc, raw, point, tolerance } = input;
   const previewId = () => '__preview__';
   switch (session.tool) {
+    case 'arc': {
+      const p = session.points;
+      if (p.length === 1) return { ...EMPTY, shapes: [createLine('__rubber__', p[0], point)], feedback: `${formatNumber(distance(p[0], point))} mm` };
+      if (p.length === 2) {
+        const g = arcThroughPoints(p[0], p[1], point);
+        if (!g) return { ...EMPTY, shapes: [createLine('__rubber__', p[0], point)], feedback: 'Points in a line' };
+        return {
+          ...EMPTY,
+          shapes: [createArc('__preview__', g.c, g.r, g.startDeg, g.sweepDeg)],
+          feedback: `R ${formatNumber(g.r)} mm  ∠ ${formatNumber(g.sweepDeg, 2)}°`,
+        };
+      }
+      return EMPTY;
+    }
     case 'trim': {
-      const s = pickShape(doc, raw, tolerance, ['line'], input.canEdit);
-      const seg = s ? trimPreview(doc, s.id, raw) : null;
-      return seg ? { ...EMPTY, removed: [seg], feedback: `Remove ${formatNumber(distance(seg[0], seg[1]))} mm` } : EMPTY;
+      const s = pickShape(doc, raw, tolerance, ['line', 'circle', 'arc'], input.canEdit);
+      const piece = s ? trimPreviewShape(doc, s.id, raw) : null;
+      if (!piece) return EMPTY;
+      const len = piece.kind === 'line' ? distance(piece.start, piece.end) : piece.kind === 'arc' ? (piece.radius * piece.sweepDeg * Math.PI) / 180 : 0;
+      return { ...EMPTY, removedShapes: [piece], feedback: `Remove ${formatNumber(len)} mm` };
+    }
+    case 'fillet':
+    case 'chamfer': {
+      if (session.picks.length === 0) return EMPTY;
+      const l = pickShape(doc, raw, tolerance, ['line'], input.canEdit);
+      if (!l || l.id === session.picks[0]) return EMPTY;
+      const r =
+        session.tool === 'fillet'
+          ? filletLines(doc, session.picks[0], session.points[0], l.id, raw, input.filletRadiusMm ?? 10, () => '__preview__')
+          : chamferLines(doc, session.picks[0], session.points[0], l.id, raw, input.chamferDistanceMm ?? 5, input.chamferDistanceMm ?? 5, () => '__preview__');
+      if (!r.ok) return { ...EMPTY, feedback: r.message };
+      const changed = r.doc.shapes.filter((x) => x.id === '__preview__' || x.id === session.picks[0] || x.id === l.id);
+      return { ...EMPTY, shapes: changed, feedback: session.tool === 'fillet' ? `R ${formatNumber(input.filletRadiusMm ?? 10)} mm` : `${formatNumber(input.chamferDistanceMm ?? 5)} mm` };
     }
     case 'extend': {
       const s = pickShape(doc, raw, tolerance, ['line'], input.canEdit);
@@ -259,7 +321,7 @@ export function toolPreview(session: ToolSession, input: ToolInput): ToolPreview
     }
     case 'dim-radius':
     case 'dim-diameter': {
-      const c = pickShape(doc, raw, tolerance, ['circle']);
+      const c = pickShape(doc, raw, tolerance, ['circle', 'arc']);
       if (!c) return EMPTY;
       const r = createRadialDimension(doc, '__preview__', session.tool === 'dim-radius' ? 'radius' : 'diameter', c.id, raw, input.dimStyle);
       return r.ok ? { ...EMPTY, dimensions: [r.value] } : EMPTY;

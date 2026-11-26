@@ -204,6 +204,10 @@ function constraintShapeIdsLocal(c: Constraint): ShapeId[] {
       return [c.p.shapeId, c.q.shapeId];
     case 'fixed-position':
       return [c.p.shapeId];
+    case 'fixed-radius':
+      return [c.shape];
+    case 'angle':
+      return [c.a, c.b];
   }
 }
 export { constraintShapeIdsLocal as constraintShapeIds };

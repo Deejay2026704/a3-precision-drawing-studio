@@ -47,13 +47,25 @@ export interface CircleShape extends ShapeBase {
   readonly radius: number;
 }
 
+/**
+ * Circular arc: the part of circle (center, radius) swept COUNTER-CLOCKWISE from startDeg
+ * through sweepDeg (0 < sweepDeg < 360). Angles in degrees from +X.
+ */
+export interface ArcShape extends ShapeBase {
+  readonly kind: 'arc';
+  readonly center: Vec2;
+  readonly radius: number;
+  readonly startDeg: number;
+  readonly sweepDeg: number;
+}
+
 /** Freehand polyline (open). */
 export interface PolylineShape extends ShapeBase {
   readonly kind: 'polyline';
   readonly points: readonly Vec2[];
 }
 
-export type Shape = LineShape | RectShape | CircleShape | PolylineShape;
+export type Shape = LineShape | RectShape | CircleShape | ArcShape | PolylineShape;
 export type ShapeKind = Shape['kind'];
 
 // ---------------------------------------------------------------------------
@@ -170,7 +182,7 @@ export const DEFAULT_LAYER: Layer = Object.freeze({ id: DEFAULT_LAYER_ID, name: 
 // Geometric constraints (Milestone 3) – DRIVING: they control geometry.
 // ---------------------------------------------------------------------------
 
-/** A constrainable point: line start/end/mid or circle centre. */
+/** A constrainable point: line or arc start/end/mid, or circle/arc centre. */
 export interface PointRef {
   readonly shapeId: ShapeId;
   readonly key: 'start' | 'end' | 'mid' | 'center';
@@ -193,6 +205,10 @@ export type Constraint = ConstraintBase &
     /** Absolute direction of the line, degrees CCW from +X. */
     | { readonly kind: 'fixed-angle'; readonly line: ShapeId; readonly value: number }
     | { readonly kind: 'fixed-position'; readonly p: PointRef; readonly x: number; readonly y: number }
+    /** Radius of a circle or arc (drawing mm). */
+    | { readonly kind: 'fixed-radius'; readonly shape: ShapeId; readonly value: number }
+    /** Angle between the directions of two lines, 0–180° (as drawn: start → end). */
+    | { readonly kind: 'angle'; readonly a: ShapeId; readonly b: ShapeId; readonly value: number }
   );
 
 export type ConstraintKind = Constraint['kind'];
@@ -208,9 +224,45 @@ export const CONSTRAINT_LABELS: Record<ConstraintKind, string> = {
   'fixed-length': 'Fixed length',
   'fixed-angle': 'Fixed angle',
   'fixed-position': 'Fixed position',
+  'fixed-radius': 'Fixed radius',
+  angle: 'Angle between lines',
 };
 
 export type PageOrientation = 'landscape' | 'portrait';
+
+/** Title block and drawing frame (Milestone 5). Laid out in PAPER millimetres. */
+export interface TitleBlock {
+  readonly visible: boolean;
+  readonly title: string;
+  readonly drawingNumber: string;
+  readonly revision: string;
+  readonly drawnBy: string;
+  readonly checkedBy: string;
+  /** Free text, normally ISO date (YYYY-MM-DD). */
+  readonly date: string;
+  readonly company: string;
+}
+
+export const TITLE_BLOCK_FIELDS: readonly { key: Exclude<keyof TitleBlock, 'visible'>; label: string; max: number }[] = [
+  { key: 'title', label: 'Title', max: 80 },
+  { key: 'drawingNumber', label: 'Drawing no.', max: 40 },
+  { key: 'revision', label: 'Revision', max: 10 },
+  { key: 'drawnBy', label: 'Drawn by', max: 40 },
+  { key: 'checkedBy', label: 'Checked by', max: 40 },
+  { key: 'date', label: 'Date', max: 20 },
+  { key: 'company', label: 'Company', max: 60 },
+];
+
+export const DEFAULT_TITLE_BLOCK: TitleBlock = Object.freeze({
+  visible: false,
+  title: '',
+  drawingNumber: '',
+  revision: 'A',
+  drawnBy: '',
+  checkedBy: '',
+  date: '',
+  company: '',
+});
 
 export interface DrawingDocument {
   readonly page: PageSize;
@@ -222,6 +274,8 @@ export interface DrawingDocument {
   /** Bottom-to-top order. Always at least one layer. */
   readonly layers: readonly Layer[];
   readonly constraints: readonly Constraint[];
+  /** Drawing frame + title block on the sheet. */
+  readonly titleBlock: TitleBlock;
 }
 
 export const DEFAULT_STYLE: ShapeStyle = Object.freeze({ stroke: '#000000', strokeWidthMm: 0.35 });
@@ -233,5 +287,6 @@ export const SHAPE_KIND_LABELS: Record<ShapeKind, string> = {
   line: 'Line',
   rect: 'Rectangle',
   circle: 'Circle',
+  arc: 'Arc',
   polyline: 'Freehand polyline',
 };

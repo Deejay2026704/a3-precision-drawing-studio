@@ -1,8 +1,12 @@
 import { isValidScale } from '../geometry/scale';
 import type { Vec2 } from '../geometry/vec';
 import { DEFAULT_SNAP_SETTINGS, OBJECT_SNAP_KINDS, type ObjectSnapKind } from '../model/snap';
+import { constraintShapeIds } from '../model/layers';
 import {
   DEFAULT_LAYER,
+  DEFAULT_TITLE_BLOCK,
+  TITLE_BLOCK_FIELDS,
+  type TitleBlock,
   type ArrowheadStyle,
   type Constraint,
   type DimAnchor,
@@ -23,6 +27,7 @@ import {
  *   v2 (Milestone 2)  + dimensions
  *   v3 (Milestone 3)  + layers, layerId on objects, constraints, page.orientation,
  *                       settings { activeLayerId, display preferences }
+ *   v4 (Milestone 5)  + arc shapes, radius / line-angle constraints, title block
  *
  * Older files are MIGRATED in memory (the file on disk is not touched); files from a
  * newer version are refused. Validation reports the exact path of the first problem.
@@ -31,8 +36,8 @@ import {
  * Pure functions – no file system access here (see fileService.ts).
  */
 export const FILE_FORMAT_ID = 'a3-precision-drawing';
-export const FILE_FORMAT_VERSION = 3;
-export const SUPPORTED_FORMAT_VERSIONS: readonly number[] = [1, 2, 3];
+export const FILE_FORMAT_VERSION = 4;
+export const SUPPORTED_FORMAT_VERSIONS: readonly number[] = [1, 2, 3, 4];
 export const FILE_EXTENSION = 'a3d';
 
 export class DocumentFormatError extends Error {
@@ -100,6 +105,7 @@ export function serializeProject(doc: DrawingDocument, settings: ProjectSettings
     shapes: doc.shapes.map((s) => ({ ...s, layerId: s.layerId ?? fallback })),
     dimensions: doc.dimensions.map((d) => ({ ...d, layerId: d.layerId ?? fallback })),
     constraints: doc.constraints,
+    titleBlock: doc.titleBlock,
     settings: {
       activeLayerId: doc.layers.some((l) => l.id === settings.activeLayerId) ? settings.activeLayerId : fallback,
       display: settings.display,
@@ -190,6 +196,18 @@ function shape(v: unknown, index: number): Shape {
       };
     case 'circle':
       return { ...base, kind: 'circle', center: point(o.center, `${where}.center`), radius: num(o, 'radius', where, { min: 0 }) };
+    case 'arc': {
+      const sweepDeg = num(o, 'sweepDeg', where, { gt: 0 });
+      if (sweepDeg >= 360) throw err(`${where}.sweepDeg`, 'must be less than 360');
+      return {
+        ...base,
+        kind: 'arc',
+        center: point(o.center, `${where}.center`),
+        radius: num(o, 'radius', where, { gt: 0 }),
+        startDeg: num(o, 'startDeg', where),
+        sweepDeg,
+      };
+    }
     case 'polyline': {
       const pts = arr(o.points, `${where}.points`);
       if (pts.length < 1) throw err(`${where}.points`, 'must contain at least one point');
@@ -298,6 +316,13 @@ function constraint(v: unknown, index: number): Constraint {
       return { ...base, kind: 'fixed-angle', line: str(o, 'line', where), value: num(o, 'value', where) };
     case 'fixed-position':
       return { ...base, kind: 'fixed-position', p: pointRef(o.p, `${where}.p`), x: num(o, 'x', where), y: num(o, 'y', where) };
+    case 'fixed-radius':
+      return { ...base, kind: 'fixed-radius', shape: str(o, 'shape', where), value: num(o, 'value', where, { gt: 0 }) };
+    case 'angle': {
+      const value = num(o, 'value', where, { min: 0 });
+      if (value > 180) throw err(`${where}.value`, 'must be between 0 and 180');
+      return { ...base, kind: 'angle', a: str(o, 'a', where), b: str(o, 'b', where), value };
+    }
     default:
       throw err(`${where}.kind`, `unknown constraint kind "${String(o.kind)}"`);
   }
@@ -358,7 +383,25 @@ function migrate2to3(raw: Obj): Obj {
   };
 }
 
-const MIGRATIONS: Record<number, (raw: Obj) => Obj> = { 1: migrate1to2, 2: migrate2to3 };
+/** v3 → v4: arcs and new constraint kinds are additive; the (hidden) title block is added. */
+function migrate3to4(raw: Obj): Obj {
+  return { ...raw, formatVersion: 4, titleBlock: DEFAULT_TITLE_BLOCK };
+}
+
+function titleBlock(v: unknown): TitleBlock {
+  const where = 'titleBlock';
+  const o = obj(v, where);
+  const out: Record<string, unknown> = { visible: bool(o, 'visible', where) };
+  for (const f of TITLE_BLOCK_FIELDS) {
+    const val = o[f.key];
+    if (typeof val !== 'string') throw err(`${where}.${f.key}`, 'must be text');
+    if (val.length > f.max) throw err(`${where}.${f.key}`, `must be at most ${f.max} characters`);
+    out[f.key] = val;
+  }
+  return out as unknown as TitleBlock;
+}
+
+const MIGRATIONS: Record<number, (raw: Obj) => Obj> = { 1: migrate1to2, 2: migrate2to3, 3: migrate3to4 };
 
 export function migrateRaw(raw: Obj): Obj {
   let cur = raw;
@@ -433,8 +476,7 @@ export function parseProject(text: string): LoadedProject {
     ids.add(x.id);
   }
   const shapeIds = new Set(shapes.map((s) => s.id));
-  const refsOf = (c: Constraint): string[] =>
-    c.kind === 'coincident' ? [c.p.shapeId, c.q.shapeId] : c.kind === 'fixed-position' ? [c.p.shapeId] : 'line' in c ? [c.line] : [c.a, c.b];
+  const refsOf = (c: Constraint): string[] => constraintShapeIds(c);
   for (const c of constraints) {
     const missing = refsOf(c).filter((id) => !shapeIds.has(id));
     if (missing.length) warnings.push(`Constraint "${c.id}" refers to missing object(s) ${missing.join(', ')} – shown as broken`);
@@ -448,7 +490,7 @@ export function parseProject(text: string): LoadedProject {
   }
   const settings: ProjectSettings = { activeLayerId, display: display(settingsO.display, warnings) };
 
-  return { doc: { page, scale, layers, shapes, dimensions, constraints }, settings, sourceVersion: version, warnings };
+  return { doc: { page, scale, layers, shapes, dimensions, constraints, titleBlock: titleBlock(m.titleBlock) }, settings, sourceVersion: version, warnings };
 }
 
 /** Parse and return only the document (compatibility helper). */

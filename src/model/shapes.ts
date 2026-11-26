@@ -1,7 +1,8 @@
 import { angleBetweenPoints, rotateVec } from '../geometry/angles';
 import { boundsCenter, boundsOfPoints, type Bounds } from '../geometry/bounds';
 import { add, distance, midpoint, vec, type Vec2 } from '../geometry/vec';
-import { DEFAULT_STYLE, type CircleShape, type LineShape, type PolylineShape, type RectShape, type Shape, type ShapeId, type ShapeStyle } from './types';
+import { arcBoundsPoints, normalizeArc } from './arcs';
+import { DEFAULT_STYLE, type ArcShape, type CircleShape, type LineShape, type PolylineShape, type RectShape, type Shape, type ShapeId, type ShapeStyle } from './types';
 
 // ---------- constructors ----------
 
@@ -37,6 +38,12 @@ export function createRect(
 export function createCircle(id: ShapeId, center: Vec2, radius: number, style: ShapeStyle = DEFAULT_STYLE): CircleShape {
   if (radius < 0) throw new RangeError('Circle radius must be >= 0');
   return { id, kind: 'circle', center, radius, style };
+}
+
+export function createArc(id: ShapeId, center: Vec2, radius: number, startDeg: number, sweepDeg: number, style: ShapeStyle = DEFAULT_STYLE): ArcShape {
+  if (!(radius > 0)) throw new RangeError('Arc radius must be greater than zero');
+  if (!(sweepDeg > 0 && sweepDeg < 360)) throw new RangeError('Arc sweep must be between 0° and 360°');
+  return normalizeArc({ id, kind: 'arc', center, radius, startDeg, sweepDeg, style });
 }
 
 export function createPolyline(id: ShapeId, points: readonly Vec2[], style: ShapeStyle = DEFAULT_STYLE): PolylineShape {
@@ -84,6 +91,8 @@ export function shapeBounds(s: Shape): Bounds {
         maxX: s.center.x + s.radius,
         maxY: s.center.y + s.radius,
       };
+    case 'arc':
+      return boundsOfPoints(arcBoundsPoints(s));
     case 'polyline':
       return boundsOfPoints(s.points);
   }
@@ -97,6 +106,7 @@ export function shapeCenter(s: Shape): Vec2 {
     case 'rect':
       return rectCenter(s);
     case 'circle':
+    case 'arc':
       return s.center;
     case 'polyline':
       return boundsCenter(shapeBounds(s));

@@ -1,5 +1,7 @@
 import { boundsContains, type Bounds } from '../geometry/bounds';
 import { distance, distanceToSegment, type Vec2 } from '../geometry/vec';
+import { distanceToArc } from '../geometry/arc';
+import { arcGeom } from './arcs';
 import { rectCorners, shapeBounds } from './shapes';
 import type { Shape, ShapeId } from './types';
 
@@ -14,6 +16,8 @@ export function distanceToShape(s: Shape, p: Vec2): number {
     }
     case 'circle':
       return Math.abs(distance(p, s.center) - s.radius);
+    case 'arc':
+      return distanceToArc(arcGeom(s), p);
     case 'polyline': {
       if (s.points.length === 1) return distance(p, s.points[0]);
       let d = Infinity;

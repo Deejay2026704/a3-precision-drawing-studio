@@ -24,20 +24,23 @@ import {
  * The reducer is pure and UI-independent (tested in tests/editorReducer.test.ts).
  */
 export type DimensionToolId = 'dim-aligned' | 'dim-horizontal' | 'dim-vertical' | 'dim-angular' | 'dim-radius' | 'dim-diameter';
-export type ModifyToolId = 'trim' | 'extend' | 'offset' | 'mirror';
+export type ModifyToolId = 'trim' | 'extend' | 'offset' | 'mirror' | 'fillet' | 'chamfer';
 export type ConstraintToolId = 'con-coincident' | 'con-fixed-position';
-export type ToolId = 'select' | 'line' | 'rect' | 'circle' | 'freehand' | ModifyToolId | DimensionToolId | ConstraintToolId;
+export type ToolId = 'select' | 'line' | 'rect' | 'circle' | 'arc' | 'freehand' | ModifyToolId | DimensionToolId | ConstraintToolId;
 
 export const TOOL_LABELS: Record<ToolId, string> = {
   select: 'Select',
   line: 'Line',
   rect: 'Rectangle',
   circle: 'Circle',
+  arc: 'Arc',
   freehand: 'Freehand',
   trim: 'Trim',
   extend: 'Extend',
   offset: 'Offset',
   mirror: 'Mirror',
+  fillet: 'Fillet',
+  chamfer: 'Chamfer',
   'dim-aligned': 'Aligned dimension',
   'dim-horizontal': 'Horizontal dimension',
   'dim-vertical': 'Vertical dimension',
@@ -54,11 +57,14 @@ export const TOOL_PROMPTS: Record<ToolId, string> = {
   line: 'Line: drag, or click the first point (Shift = 15° steps)',
   rect: 'Rectangle: drag, or click the first corner (Shift = square)',
   circle: 'Circle: drag, or click the centre',
+  arc: 'Arc: click the start point, then a point on the arc, then the end point',
   freehand: 'Freehand: drag to draw',
-  trim: 'Trim: click the part of a line to remove',
+  trim: 'Trim: click the part of a line, circle or arc to remove',
   extend: 'Extend: click a line near the end to extend',
   offset: 'Offset: click the object to offset',
   mirror: 'Mirror: select objects (Shift+click), then click two points on the mirror line',
+  fillet: 'Fillet: click the first line on the side to keep',
+  chamfer: 'Chamfer: click the first line on the side to keep',
   'dim-aligned': 'Aligned dimension: click the first point',
   'dim-horizontal': 'Horizontal dimension: click the first point',
   'dim-vertical': 'Vertical dimension: click the first point',
@@ -117,6 +123,9 @@ export interface EditorState {
   readonly offsetDistanceMm: number;
   /** Mirror tool: keep the source objects (copy) or replace them. */
   readonly mirrorKeepSource: boolean;
+  /** Fillet tool radius and chamfer tool distance (drawing mm). */
+  readonly filletRadiusMm: number;
+  readonly chamferDistanceMm: number;
   readonly message: string;
 }
 
@@ -149,6 +158,8 @@ export function createInitialState(): EditorState {
     dimStyle: DEFAULT_DIMENSION_STYLE,
     offsetDistanceMm: 10,
     mirrorKeepSource: true,
+    filletRadiusMm: 10,
+    chamferDistanceMm: 5,
     message: 'Ready',
   };
 }
@@ -176,6 +187,8 @@ export type EditorAction =
   | { type: 'setDimStyle'; style: Partial<DimensionStyle> }
   | { type: 'setOffsetDistance'; mm: number }
   | { type: 'setMirrorKeepSource'; keep: boolean }
+  | { type: 'setFilletRadius'; mm: number }
+  | { type: 'setChamferDistance'; mm: number }
   | { type: 'undo' }
   | { type: 'redo' }
   | { type: 'newDocument' }
@@ -383,6 +396,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return action.mm > 0 && Number.isFinite(action.mm) ? { ...state, offsetDistanceMm: action.mm } : state;
     case 'setMirrorKeepSource':
       return { ...state, mirrorKeepSource: action.keep };
+    case 'setFilletRadius':
+      return action.mm >= 0 && Number.isFinite(action.mm) ? { ...state, filletRadiusMm: action.mm } : state;
+    case 'setChamferDistance':
+      return action.mm >= 0 && Number.isFinite(action.mm) ? { ...state, chamferDistanceMm: action.mm } : state;
     case 'undo': {
       if (state.past.length === 0) return { ...state, message: 'Nothing to undo' };
       const prev = state.past[state.past.length - 1];
@@ -416,6 +433,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         dimStyle: state.dimStyle,
         offsetDistanceMm: state.offsetDistanceMm,
         mirrorKeepSource: state.mirrorKeepSource,
+        filletRadiusMm: state.filletRadiusMm,
+        chamferDistanceMm: state.chamferDistanceMm,
         message: 'New drawing',
       };
     }

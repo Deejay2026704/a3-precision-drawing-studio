@@ -10,7 +10,7 @@ import { addConstraint, constraintFromSelection } from '../model/constraints';
 import type { ConstraintKind, DrawingDocument } from '../model/types';
 import { DocumentFormatError, FILE_EXTENSION, FILE_FORMAT_VERSION, parseProject, serializeProject } from '../storage/documentStorage';
 import { exportSvg } from '../storage/exportSvg';
-import { exportPdf } from '../storage/exportPdf';
+import { exportPdf, type PdfLayout } from '../storage/exportPdf';
 import { useDialog } from './Dialog';
 import { LayersPanel } from './LayersPanel';
 import { baseName, getAutosaveService, getFileService } from '../storage/fileService';
@@ -31,6 +31,7 @@ export const TOOL_KEYS: Record<string, ToolId> = {
   l: 'line',
   r: 'rect',
   c: 'circle',
+  a: 'arc',
   f: 'freehand',
   t: 'trim',
   e: 'extend',
@@ -410,6 +411,26 @@ export function App() {
     }
   };
 
+  const exportPdfWith = async (layout: PdfLayout) => {
+    const s = stateRef.current;
+    const suffix = layout === 'a3' ? '' : layout === 'a4-tiled' ? '-A4-tiled' : '-A4-fit';
+    const name = s.fileName.replace(/\.a3d$/i, '') + suffix + '.pdf';
+    try {
+      const bytes = exportPdf(s.doc, { title: s.fileName.replace(/\.a3d$/i, ''), layout });
+      const path = await files.exportPdf(bytes, name);
+      if (!path) return;
+      const how =
+        layout === 'a3'
+          ? 'A3 at true scale (print at 100 % / Actual size)'
+          : layout === 'a4-tiled'
+            ? 'A4 tiles at true scale (print at 100 % / Actual size)'
+            : 'fitted to A4 – NOT to scale';
+      dispatch({ type: 'setMessage', message: `Exported ${baseName(path)} – ${how}, visible layers only` });
+    } catch (err) {
+      dispatch({ type: 'setMessage', message: `⚠ PDF export failed: ${(err as Error).message}` });
+    }
+  };
+
   const fileCommands: FileCommands = {
     newDrawing: async () => {
       if (!(await confirmDiscard('creating a new drawing'))) return;
@@ -433,17 +454,26 @@ export function App() {
     saveAs: async () => {
       await saveAs();
     },
-    exportPdf: async () => {
-      const s = stateRef.current;
-      const name = s.fileName.replace(/\.a3d$/i, '') + '.pdf';
-      try {
-        const bytes = exportPdf(s.doc, { title: s.fileName.replace(/\.a3d$/i, '') });
-        const path = await files.exportPdf(bytes, name);
-        if (path) dispatch({ type: 'setMessage', message: `Exported ${baseName(path)} – A3 at true scale (print at 100 % / Actual size), visible layers only` });
-      } catch (err) {
-        dispatch({ type: 'setMessage', message: `⚠ PDF export failed: ${(err as Error).message}` });
-      }
+    exportPdfA4: async () => {
+      const a = await ask({
+        title: 'Export PDF for an A4 printer',
+        message: 'How should the A3 sheet be printed on A4 paper?',
+        detail: [
+          'Tiled: 4 A4 landscape pages at TRUE SCALE with 10 mm overlap and alignment marks – print at 100 % / Actual size, then tape the pages together.',
+          'Fit: the whole sheet reduced onto one A4 page – NOT to scale (marked on the page).',
+        ],
+        choice: { label: 'Layout', options: [{ value: 'a4-tiled', label: 'Tiled – true scale (4 pages)' }, { value: 'a4-fit', label: 'Fit to one page – not to scale' }] },
+        buttons: [
+          { id: 'export', label: 'Export…', kind: 'primary' },
+          { id: 'cancel', label: 'Cancel' },
+        ],
+        cancelId: 'cancel',
+        testId: 'dialog-pdf-layout',
+      });
+      if (a.button !== 'export') return;
+      await exportPdfWith(a.choice === 'a4-fit' ? 'a4-fit' : 'a4-tiled');
     },
+    exportPdf: async () => exportPdfWith('a3'),
     exportSvg: async () => {
       const s = stateRef.current;
       const name = s.fileName.replace(/\.a3d$/i, '') + '.svg';

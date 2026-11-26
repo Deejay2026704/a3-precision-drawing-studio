@@ -8,6 +8,7 @@ export interface FileCommands {
   saveAs(): void | Promise<void>;
   exportSvg(): void | Promise<void>;
   exportPdf(): void | Promise<void>;
+  exportPdfA4(): void | Promise<void>;
   toggleAutosave(): void;
   readonly autosaveLabel: string;
   exit(): void;
@@ -59,7 +60,8 @@ export function FileMenu({ commands }: { commands: FileCommands }) {
           {item('Save', 'Ctrl+S', commands.save, 'menu-save')}
           {item('Save As…', 'Ctrl+Shift+S', commands.saveAs, 'menu-save-as')}
           <div className="menu-sep" />
-          {item('Export PDF…', 'Ctrl+P', commands.exportPdf, 'menu-export-pdf')}
+          {item('Export PDF (A3, true scale)…', 'Ctrl+P', commands.exportPdf, 'menu-export-pdf')}
+          {item('Export PDF for an A4 printer…', '', commands.exportPdfA4, 'menu-export-pdf-a4')}
           {item('Export SVG…', '', commands.exportSvg, 'menu-export-svg')}
           <div className="menu-sep" />
           {item(commands.autosaveLabel, '', commands.toggleAutosave, 'menu-autosave')}

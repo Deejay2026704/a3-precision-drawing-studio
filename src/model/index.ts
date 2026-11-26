@@ -11,3 +11,5 @@ export * from './dimensions';
 export * from './modify';
 export * from './layers';
 export * from './constraints';
+export * from './curves';
+export * from './titleBlock';

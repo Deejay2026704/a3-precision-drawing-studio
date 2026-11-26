@@ -19,7 +19,9 @@ import {
   setRectSize,
 } from '../model/operations';
 import { lineAngle, lineLength, polylineLength, shapeBounds } from '../model/shapes';
-import { LINE_WEIGHTS, SHAPE_KIND_LABELS, type Shape, type ShapeId, type ShapeStyle } from '../model/types';
+import { LINE_WEIGHTS, SHAPE_KIND_LABELS, TITLE_BLOCK_FIELDS, type Shape, type ShapeId, type ShapeStyle, type TitleBlock } from '../model/types';
+import { todayIso } from '../model/titleBlock';
+import { TextField } from './TextField';
 import { NumberField } from './NumberField';
 import type { EditorAction, EditorState } from './state/editorReducer';
 
@@ -44,10 +46,15 @@ export function PropertiesPanel({ state, dispatch, newId }: { state: EditorState
   return (
     <aside className="properties" data-testid="properties-panel">
       <h2 className="panel-title">Properties</h2>
-      {(tool === 'line' || tool === 'rect' || tool === 'circle') && (
+      {(tool === 'line' || tool === 'rect' || tool === 'circle' || tool === 'arc') && (
         <CreateByNumbers key={tool} tool={tool} style={state.drawStyle} dispatch={dispatch} newId={newId} />
       )}
-      {shapes.length === 0 && dims.length === 0 && cons.length === 0 && <DocumentProperties state={state} />}
+      {shapes.length === 0 && dims.length === 0 && cons.length === 0 && (
+        <>
+          <DocumentProperties state={state} />
+          <TitleBlockProperties state={state} dispatch={dispatch} />
+        </>
+      )}
       {cons.length === 1 && shapes.length === 0 && dims.length === 0 && <ConstraintProperties c={cons[0]} doc={doc} dispatch={dispatch} />}
       {cons.length > 1 && shapes.length === 0 && dims.length === 0 && (
         <section className="panel-section" data-testid="props-multi-constraint">
@@ -154,6 +161,26 @@ function SingleShapeProperties({ shape: s, scale, update }: { shape: Shape; scal
           <OnPaper label="Diameter" value={s.radius * 2} scale={scale} />
         </>
       )}
+      {s.kind === 'arc' && (
+        <>
+          <div className="field-grid">
+            <NumberField label="Centre X" testId="prop-cx" value={s.center.x} onCommit={(v) => u({ ...s, center: vec(v, s.center.y) }, 'centre X')} />
+            <NumberField label="Centre Y" testId="prop-cy" value={s.center.y} onCommit={(v) => u({ ...s, center: vec(s.center.x, v) }, 'centre Y')} />
+            <NumberField label="Radius" testId="prop-radius" min={0.000001} value={s.radius} onCommit={(v) => u({ ...s, radius: v }, 'radius')} />
+            <NumberField label="Sweep" testId="prop-sweep" unit="°" value={s.sweepDeg} onCommit={(v) => (v > 0 && v < 360 ? u({ ...s, sweepDeg: v }, 'sweep') : undefined)} title="Counter-clockwise from the start angle, 0°–360°" />
+            <NumberField label="Start angle" testId="prop-start" unit="°" value={s.startDeg} onCommit={(v) => u({ ...s, startDeg: ((v % 360) + 360) % 360 }, 'start angle')} title="Rotates the arc (sweep kept)" />
+            <NumberField label="End angle" testId="prop-end" unit="°" value={(s.startDeg + s.sweepDeg) % 360} onCommit={(v) => {
+              const sw = (((v - s.startDeg) % 360) + 360) % 360;
+              if (sw > 0) u({ ...s, sweepDeg: sw }, 'end angle');
+            }} title="Changes the sweep (start kept)" />
+          </div>
+          <dl className="info">
+            <dt>Arc length</dt>
+            <dd data-testid="prop-arc-length">{formatNumber((s.radius * s.sweepDeg * Math.PI) / 180)} mm</dd>
+          </dl>
+          <OnPaper label="Radius" value={s.radius} scale={scale} />
+        </>
+      )}
       {s.kind === 'polyline' && <PolylineFields s={s} u={u} />}
     </section>
   );
@@ -249,6 +276,32 @@ function StyleProperties({ shapes, update }: { shapes: Shape[]; update: Update }
           ))}
         </select>
       </label>
+    </section>
+  );
+}
+
+/** Title block / drawing frame editor (shown when nothing is selected). */
+function TitleBlockProperties({ state, dispatch }: { state: EditorState; dispatch: Dispatch<EditorAction> }) {
+  const tb = state.doc.titleBlock;
+  const set = (patch: Partial<TitleBlock>, message: string) =>
+    dispatch({ type: 'commitDocument', doc: { ...state.doc, titleBlock: { ...tb, ...patch } }, message });
+  return (
+    <section className="panel-section" data-testid="title-block-panel">
+      <h3>Title block</h3>
+      <label className="field" title="Show the drawing frame and title block on the sheet, in exports and in PDFs">
+        <span className="field-label">Show</span>
+        <input
+          type="checkbox"
+          data-testid="title-block-visible"
+          checked={tb.visible}
+          onChange={(e) => set({ visible: e.target.checked, ...(e.target.checked && !tb.date ? { date: todayIso() } : {}) }, `Title block ${e.target.checked ? 'shown' : 'hidden'}`)}
+        />
+      </label>
+      {tb.visible &&
+        TITLE_BLOCK_FIELDS.map((f) => (
+          <TextField key={f.key} label={f.label} testId={`tb-${f.key}`} value={tb[f.key]} maxLength={f.max} onCommit={(v) => set({ [f.key]: v } as Partial<TitleBlock>, `Title block: ${f.label.toLowerCase()} changed`)} />
+        ))}
+      {tb.visible && <p className="hint">Scale and sheet size are filled in automatically.</p>}
     </section>
   );
 }

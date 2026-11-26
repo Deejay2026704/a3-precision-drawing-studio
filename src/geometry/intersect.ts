@@ -1,3 +1,4 @@
+import { nearestOnArc, pointOnArc } from './arc';
 import { add, distance, dot, EPSILON, length, mul, sub, vec, type Vec2 } from './vec';
 
 /**
@@ -11,7 +12,13 @@ export const GEOM_TOL = 1e-9;
 
 export type Primitive =
   | { readonly type: 'seg'; readonly a: Vec2; readonly b: Vec2 }
-  | { readonly type: 'circle'; readonly c: Vec2; readonly r: number };
+  | { readonly type: 'circle'; readonly c: Vec2; readonly r: number }
+  /** Arc of circle (c, r): CCW from startDeg through sweepDeg. */
+  | { readonly type: 'arc'; readonly c: Vec2; readonly r: number; readonly startDeg: number; readonly sweepDeg: number };
+
+/** Round primitives share circle maths; an arc additionally clips to its sweep. */
+const onPrim = (q: Primitive, p: Vec2): boolean => q.type !== 'arc' || pointOnArc(q, p);
+const asCircle = (q: Primitive) => q as { c: Vec2; r: number };
 
 export const cross = (a: Vec2, b: Vec2): number => a.x * b.y - a.y * b.x;
 
@@ -83,23 +90,27 @@ export function circleCircleIntersection(c1: Vec2, r1: number, c2: Vec2, r2: num
   return [vec(base.x - uy * h, base.y + ux * h), vec(base.x + uy * h, base.y - ux * h)];
 }
 
-/** All intersection points of two primitives (segments are finite). */
+/** All intersection points of two primitives (segments and arcs are finite). */
 export function intersectPrimitives(p: Primitive, q: Primitive): Vec2[] {
   if (p.type === 'seg' && q.type === 'seg') {
     const h = segmentIntersection(p.a, p.b, q.a, q.b);
     return h ? [h.point] : [];
   }
-  if (p.type === 'circle' && q.type === 'circle') return circleCircleIntersection(p.c, p.r, q.c, q.r);
+  if (p.type !== 'seg' && q.type !== 'seg') {
+    return circleCircleIntersection(asCircle(p).c, asCircle(p).r, asCircle(q).c, asCircle(q).r).filter((x) => onPrim(p, x) && onPrim(q, x));
+  }
   const seg = (p.type === 'seg' ? p : q) as Extract<Primitive, { type: 'seg' }>;
-  const cir = (p.type === 'circle' ? p : q) as Extract<Primitive, { type: 'circle' }>;
-  return lineCircleParams(seg.a, seg.b, cir.c, cir.r)
+  const round = p.type === 'seg' ? q : p;
+  return lineCircleParams(seg.a, seg.b, asCircle(round).c, asCircle(round).r)
     .filter((t) => t >= -1e-12 && t <= 1 + 1e-12)
-    .map((t) => add(seg.a, mul(sub(seg.b, seg.a), t)));
+    .map((t) => add(seg.a, mul(sub(seg.b, seg.a), t)))
+    .filter((x) => onPrim(round, x));
 }
 
 /** Parameters t (along the infinite line p1→p2) of its intersections with a primitive. */
 export function lineParamsWithPrimitive(p1: Vec2, p2: Vec2, q: Primitive): number[] {
   if (q.type === 'circle') return lineCircleParams(p1, p2, q.c, q.r);
+  if (q.type === 'arc') return lineCircleParams(p1, p2, q.c, q.r).filter((t) => onPrim(q, add(p1, mul(sub(p2, p1), t))));
   const h = lineLineIntersection(p1, p2, q.a, q.b);
   return h && h.u >= -1e-12 && h.u <= 1 + 1e-12 ? [h.t] : [];
 }
@@ -122,6 +133,7 @@ export function nearestOnCircle(p: Vec2, c: Vec2, r: number): Vec2 {
 }
 
 export function nearestOnPrimitive(p: Vec2, q: Primitive): Vec2 {
+  if (q.type === 'arc') return nearestOnArc(q, p);
   return q.type === 'seg' ? nearestOnSegment(p, q.a, q.b) : nearestOnCircle(p, q.c, q.r);
 }
 
@@ -143,7 +155,7 @@ export function perpendicularFeet(base: Vec2, q: Primitive): Vec2[] {
   const l = length(v);
   if (l < EPSILON) return [];
   const u = mul(v, 1 / l);
-  return [add(q.c, mul(u, q.r)), sub(q.c, mul(u, q.r))];
+  return [add(q.c, mul(u, q.r)), sub(q.c, mul(u, q.r))].filter((x) => onPrim(q, x));
 }
 
 /** Tangent points on a circle as seen from an external point. Inside / on the circle → none. */

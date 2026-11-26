@@ -28,6 +28,7 @@ import { HorizontalRuler, RULER_SIZE, VerticalRuler } from '../render/Rulers';
 import { DimensionGrips, HANDLE_SIZE_PX, ROTATE_HANDLE_OFFSET_PX, SelectionOverlay } from '../render/SelectionOverlay';
 import { CursorFeedback, SnapMarker } from '../render/SnapMarker';
 import { ShapeView } from '../render/ShapeView';
+import { SheetView } from '../render/SheetView';
 import { newSession, sessionInProgress, toolClick, toolPreview, type SessionTool, type ToolInput, type ToolSession } from './interaction/toolSession';
 import { snapSettingsOf, TOOL_PROMPTS, type EditorAction, type EditorState, type ToolId } from './state/editorReducer';
 
@@ -72,6 +73,8 @@ function describeShape(s: Shape): string {
       return `${fmt(s.width)} × ${fmt(s.height)} mm`;
     case 'circle':
       return `R ${fmt(s.radius)}  ⌀ ${fmt(2 * s.radius)} mm`;
+    case 'arc':
+      return `R ${fmt(s.radius)}  ∠ ${formatNumber(s.sweepDeg, 2)}°  L ${fmt((s.radius * s.sweepDeg * Math.PI) / 180)} mm`;
     case 'polyline':
       return `${s.points.length} points`;
   }
@@ -305,6 +308,9 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
     offsetDistanceMm: state.offsetDistanceMm,
     mirrorKeepSource: state.mirrorKeepSource,
     newId,
+    drawStyle: state.drawStyle,
+    filletRadiusMm: state.filletRadiusMm,
+    chamferDistanceMm: state.chamferDistanceMm,
     canEdit: (sh) => isEditable(doc, sh),
     canSee: (sh) => isVisible(doc, sh),
   });
@@ -603,6 +609,7 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
           onContextMenu={(e) => e.preventDefault()}
         >
           <PageView page={doc.page} transform={transform} showGrid={view.showGrid} gridSpacingMm={view.gridSpacingMm} />
+          <SheetView doc={doc} transform={transform} />
           <g data-testid="shapes">
             {shown.map((s) => (
               <ShapeView key={s.id} shape={s} transform={transform} stroke={selectedSet.has(s.id) && tool !== 'select' ? '#1a73e8' : resolveStroke(doc, s)} />
@@ -640,11 +647,11 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
                 const lay = layoutDimension(doc, dm, doc.scale);
                 return lay ? <DimensionLayoutView key={dm.id} layout={lay} arrowhead={dm.style.arrowhead} transform={transform} color="#1a73e8" /> : null;
               })}
-              {preview.removed.map(([a, b], i) => {
-                const p = worldToScreen(a, transform);
-                const q = worldToScreen(b, transform);
-                return <line key={i} x1={p.x} y1={p.y} x2={q.x} y2={q.y} className="trim-preview" data-testid="trim-preview" />;
-              })}
+              {preview.removedShapes.map((s, i) => (
+                <g key={i} className="trim-preview" data-testid="trim-preview">
+                  <ShapeView shape={{ ...s, id: `__trim__${i}` }} transform={transform} stroke="#d93025" dashed />
+                </g>
+              ))}
             </g>
           )}
           {frame && <SelectionOverlay frame={frame} transform={transform} interactive={tool === 'select'} />}
@@ -674,6 +681,8 @@ function isMeaningful(s: Shape): boolean {
       return s.width > 1e-9 && s.height > 1e-9;
     case 'circle':
       return s.radius > 1e-9;
+    case 'arc':
+      return s.radius > 1e-9 && s.sweepDeg > 1e-9;
     case 'polyline':
       return s.points.length >= 2;
   }
@@ -687,6 +696,8 @@ export function describeCreated(s: Shape): string {
       return `Rectangle created – ${formatNumber(s.width)} × ${formatNumber(s.height)} mm`;
     case 'circle':
       return `Circle created – radius ${formatNumber(s.radius)} mm`;
+    case 'arc':
+      return `Arc created – radius ${formatNumber(s.radius)} mm, ${formatNumber(s.sweepDeg)}°`;
     case 'polyline':
       return `Freehand polyline created – ${s.points.length} points`;
   }
@@ -719,7 +730,12 @@ function layoutConstraintMarkers(doc: import('../model/types').DrawingDocument, 
     const refs = constraintShapeIds(c).map((id) => doc.shapes.find((x) => x.id === id));
     if (refs.some((r) => r && !isVisible(doc, r))) continue;
     const status = constraintStatus(doc, c);
-    const value = c.kind === 'fixed-length' ? ` ${formatNumber(c.value, 2)}` : c.kind === 'fixed-angle' ? ` ${formatNumber(c.value, 2)}°` : '';
+    const value =
+      c.kind === 'fixed-length' || c.kind === 'fixed-radius'
+        ? ` ${formatNumber(c.value, 2)}`
+        : c.kind === 'fixed-angle' || c.kind === 'angle'
+          ? ` ${formatNumber(c.value, 2)}°`
+          : '';
     const label = `${CONSTRAINT_GLYPHS[c.kind]}${value}${status === 'unsatisfied' || status === 'broken' ? ' !' : ''}`;
     const w = Math.max(18, label.length * 7 + 8);
     const h = 16;

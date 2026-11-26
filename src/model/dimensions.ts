@@ -3,6 +3,8 @@ import { cross, lineLineIntersection } from '../geometry/intersect';
 import { pageLengthToWorld, type DrawingScale } from '../geometry/scale';
 import { add, distance, distanceToSegment, dot, EPSILON, length, midpoint, mul, sub, vec, type Vec2 } from '../geometry/vec';
 import { resolveAnchor } from './anchors';
+import { angleOnArc } from '../geometry/arc';
+import { arcGeom } from './arcs';
 import type {
   AngularDimension,
   DimAnchor,
@@ -99,7 +101,7 @@ export function measureDimension(doc: DocLike, dim: Dimension): number | null {
     case 'radius':
     case 'diameter': {
       const c = doc.shapes.find((s) => s.id === dim.circleId);
-      if (!c || c.kind !== 'circle') return null;
+      if (!c || (c.kind !== 'circle' && c.kind !== 'arc')) return null;
       return dim.kind === 'radius' ? c.radius : 2 * c.radius;
     }
     case 'angular':
@@ -223,7 +225,7 @@ export function layoutDimension(doc: DocLike, dim: Dimension, scale: DrawingScal
     case 'radius':
     case 'diameter': {
       const c = doc.shapes.find((s) => s.id === dim.circleId);
-      if (!c || c.kind !== 'circle') return null;
+      if (!c || (c.kind !== 'circle' && c.kind !== 'arc')) return null;
       const u = dirVec(dim.angleDeg);
       const q = add(c.center, mul(u, c.radius));
       if (dim.kind === 'radius') {
@@ -350,9 +352,11 @@ export function createRadialDimension(
   style: DimensionStyle,
 ): DimResult<RadialDimension> {
   const c = doc.shapes.find((s) => s.id === circleId);
-  if (!c || c.kind !== 'circle') return { ok: false, message: 'Radius and diameter dimensions need a circle' };
+  if (!c || (c.kind !== 'circle' && c.kind !== 'arc')) return { ok: false, message: 'Radius and diameter dimensions need a circle or an arc' };
   if (c.radius < 1e-9) return { ok: false, message: 'Circle has zero radius' };
-  const angleDeg = distance(pick, c.center) < EPSILON ? 45 : angleBetweenPoints(c.center, pick);
+  let angleDeg = distance(pick, c.center) < EPSILON ? 45 : angleBetweenPoints(c.center, pick);
+  // On an arc the leader should point at the arc itself.
+  if (c.kind === 'arc' && !angleOnArc(arcGeom(c), angleDeg)) angleDeg = c.startDeg + c.sweepDeg / 2;
   return { ok: true, value: { id, kind, mode: 'driven', style, textShift: 0, circleId, angleDeg } };
 }
 
@@ -400,7 +404,7 @@ export function applyDimensionGrip(doc: DocLike, dim: Dimension, grip: DimGripId
     case 'radius':
     case 'diameter': {
       const c = doc.shapes.find((s) => s.id === dim.circleId);
-      if (!c || c.kind !== 'circle' || grip !== 'leader' || distance(q, c.center) < EPSILON) return dim;
+      if (!c || (c.kind !== 'circle' && c.kind !== 'arc') || grip !== 'leader' || distance(q, c.center) < EPSILON) return dim;
       return { ...dim, angleDeg: angleBetweenPoints(c.center, q) };
     }
     case 'angular': {

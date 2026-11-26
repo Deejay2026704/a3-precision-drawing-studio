@@ -367,7 +367,7 @@ try {
   await win.click('[data-testid=menu-save-as]');
   await win.waitForTimeout(300);
   const saved = existsSync(tmp) ? JSON.parse(readFileSync(tmp, 'utf8')) : null;
-  check('saved (current format version 3) with all dimensions', saved && saved.formatVersion === 3 && saved.dimensions.length === final.dims);
+  check('saved (current format version 4) with all dimensions', saved && saved.formatVersion === 4 && saved.dimensions.length === final.dims);
   await win.click('[data-testid=file-menu-button]');
   await win.click('[data-testid=menu-new]');
   await win.click('[data-testid=file-menu-button]');

@@ -1,6 +1,6 @@
 import { useState, type Dispatch } from 'react';
 import { vec } from '../geometry/vec';
-import { createCircle, createLine, createRect } from '../model/shapes';
+import { createArc, createCircle, createLine, createRect } from '../model/shapes';
 import { polarPoint } from '../geometry/angles';
 import type { Shape, ShapeId, ShapeStyle } from '../model/types';
 import { describeCreated } from './DrawingCanvas';
@@ -11,8 +11,8 @@ import type { EditorAction } from './state/editorReducer';
  * Exact numeric creation for the active draw tool: type the values, press Create.
  * Line: start, length, angle. Rectangle: corner, width, height, rotation. Circle: centre, radius/diameter.
  */
-export function CreateByNumbers({ tool, style, dispatch, newId }: { tool: 'line' | 'rect' | 'circle'; style: ShapeStyle; dispatch: Dispatch<EditorAction>; newId: () => ShapeId }) {
-  const [v, setV] = useState({ x: 0, y: 0, length: 100, angle: 0, width: 100, height: 50, rotation: 0, radius: 25 });
+export function CreateByNumbers({ tool, style, dispatch, newId }: { tool: 'line' | 'rect' | 'circle' | 'arc'; style: ShapeStyle; dispatch: Dispatch<EditorAction>; newId: () => ShapeId }) {
+  const [v, setV] = useState({ x: 0, y: 0, length: 100, angle: 0, width: 100, height: 50, rotation: 0, radius: 25, start: 0, sweep: 90 });
   const set = (k: keyof typeof v) => (n: number) => setV((o) => ({ ...o, [k]: n }));
 
   const create = () => {
@@ -23,6 +23,10 @@ export function CreateByNumbers({ tool, style, dispatch, newId }: { tool: 'line'
     } else if (tool === 'rect') {
       if (!(v.width > 0 && v.height > 0)) return dispatch({ type: 'setMessage', message: '⚠ Width and height must be greater than zero' });
       shape = createRect(newId(), vec(v.x, v.y), v.width, v.height, v.rotation, style);
+    } else if (tool === 'arc') {
+      if (!(v.radius > 0)) return dispatch({ type: 'setMessage', message: '⚠ Radius must be greater than zero' });
+      if (!(v.sweep > 0 && v.sweep < 360)) return dispatch({ type: 'setMessage', message: '⚠ Sweep must be between 0° and 360°' });
+      shape = createArc(newId(), vec(v.x, v.y), v.radius, v.start, v.sweep, style);
     } else {
       if (!(v.radius > 0)) return dispatch({ type: 'setMessage', message: '⚠ Radius must be greater than zero' });
       shape = createCircle(newId(), vec(v.x, v.y), v.radius, style);
@@ -30,13 +34,13 @@ export function CreateByNumbers({ tool, style, dispatch, newId }: { tool: 'line'
     dispatch({ type: 'addShapes', shapes: [shape], message: describeCreated(shape) });
   };
 
-  const title = tool === 'line' ? 'New line' : tool === 'rect' ? 'New rectangle' : 'New circle';
+  const title = tool === 'line' ? 'New line' : tool === 'rect' ? 'New rectangle' : tool === 'arc' ? 'New arc' : 'New circle';
   return (
     <section className="panel-section create-section" data-testid={`create-${tool}`}>
       <h3>{title} by numbers</h3>
       <div className="field-grid">
-        <NumberField label={tool === 'circle' ? 'Centre X' : tool === 'rect' ? 'Corner X' : 'Start X'} testId="new-x" value={v.x} onCommit={set('x')} />
-        <NumberField label={tool === 'circle' ? 'Centre Y' : tool === 'rect' ? 'Corner Y' : 'Start Y'} testId="new-y" value={v.y} onCommit={set('y')} />
+        <NumberField label={tool === 'circle' || tool === 'arc' ? 'Centre X' : tool === 'rect' ? 'Corner X' : 'Start X'} testId="new-x" value={v.x} onCommit={set('x')} />
+        <NumberField label={tool === 'circle' || tool === 'arc' ? 'Centre Y' : tool === 'rect' ? 'Corner Y' : 'Start Y'} testId="new-y" value={v.y} onCommit={set('y')} />
         {tool === 'line' && (
           <>
             <NumberField label="Length" testId="new-length" min={0} value={v.length} onCommit={set('length')} />
@@ -48,6 +52,13 @@ export function CreateByNumbers({ tool, style, dispatch, newId }: { tool: 'line'
             <NumberField label="Width" testId="new-width" min={0} value={v.width} onCommit={set('width')} />
             <NumberField label="Height" testId="new-height" min={0} value={v.height} onCommit={set('height')} />
             <NumberField label="Rotation" testId="new-rotation" unit="°" value={v.rotation} onCommit={set('rotation')} />
+          </>
+        )}
+        {tool === 'arc' && (
+          <>
+            <NumberField label="Radius" testId="new-radius" min={0} value={v.radius} onCommit={set('radius')} />
+            <NumberField label="Start angle" testId="new-start" unit="°" value={v.start} onCommit={set('start')} title="Degrees counter-clockwise from +X" />
+            <NumberField label="Sweep" testId="new-sweep" unit="°" value={v.sweep} onCommit={set('sweep')} title="Counter-clockwise, between 0° and 360°" />
           </>
         )}
         {tool === 'circle' && (

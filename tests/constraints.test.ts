@@ -11,8 +11,10 @@ import {
   type ConstraintResult,
 } from '../src/model/constraints';
 import { addLayer, setLayerProps, type LayerResult } from '../src/model/layers';
-import { createCircle, createLine, lineAngle, lineLength } from '../src/model/shapes';
-import type { CircleShape, Constraint, DrawingDocument, LineShape, Shape } from '../src/model/types';
+import { createArc, createCircle, createLine, lineAngle, lineLength } from '../src/model/shapes';
+import { arcStart } from '../src/model/arcs';
+import { parseProject, serializeProject } from '../src/storage/documentStorage';
+import type { ArcShape, CircleShape, Constraint, DrawingDocument, LineShape, Shape } from '../src/model/types';
 
 const docOf = (...shapes: Shape[]): DrawingDocument => ({ ...createEmptyDocument(), shapes });
 const ok = (r: ConstraintResult) => {
@@ -236,5 +238,65 @@ describe('constraints from a selection', () => {
     expect(constraintFromSelection('tangent', [A, C], 'k')).toMatchObject({ a: 'A', b: 'C' });
     expect(constraintFromSelection('tangent', [createCircle('s', vec(0, 0), 2), createCircle('t', vec(0, 0.5), 10)], 'k')).toMatchObject({ internal: true });
     expect(constraintFromSelection('tangent', [A, B], 'k')).toMatch(/circle/);
+  });
+});
+
+describe('Milestone 5: radius and line-angle constraints, arcs in the solver', () => {
+  const ARC = createArc('ARC', vec(50, 50), 20, 0, 120);
+
+  it('fixed radius: circle and arc follow an edited value exactly; centres stay put', () => {
+    let d = ok(addConstraint(docOf(C), { ...base, id: 'r', kind: 'fixed-radius', shape: 'C', value: 10 }));
+    d = ok(updateConstraint(d, { ...base, id: 'r', kind: 'fixed-radius', shape: 'C', value: 17.5 }));
+    expect(circle(d, 'C')).toMatchObject({ radius: expect.closeTo(17.5, 9), center: vec(50, 50) });
+    let a = ok(addConstraint(docOf(ARC), { ...base, id: 'r', kind: 'fixed-radius', shape: 'ARC', value: 20 }));
+    a = ok(updateConstraint(a, { ...base, id: 'r', kind: 'fixed-radius', shape: 'ARC', value: 32 }));
+    const arc = a.shapes[0] as ArcShape;
+    expect(arc.radius).toBeCloseTo(32, 9);
+    expect(arc.sweepDeg).toBeCloseTo(120, 6);
+    expect(constraintStatus(a, a.constraints[0])).toBe('satisfied');
+  });
+
+  it('angle between two lines: created at the current angle, edited exactly', () => {
+    const c = constraintFromSelection('angle', [A, B], 'g');
+    expect(typeof c).not.toBe('string');
+    let d = ok(addConstraint(docOf(A, B), c as Constraint));
+    d = ok(updateConstraint(d, { ...(c as Extract<Constraint, { kind: 'angle' }>), value: 60 }));
+    const a = line(d, 'A');
+    const b = line(d, 'B');
+    const ang = (Math.acos(((a.end.x - a.start.x) * (b.end.x - b.start.x) + (a.end.y - a.start.y) * (b.end.y - b.start.y)) / (lineLength(a) * lineLength(b))) * 180) / Math.PI;
+    expect(ang).toBeCloseTo(60, 6);
+  });
+
+  it('conflicts are refused: angle 30° on lines that are also parallel', () => {
+    const d = ok(addConstraint(docOf(A, B), { ...base, id: 'p', kind: 'parallel', a: 'A', b: 'B' }));
+    expect(addConstraint(d, { ...base, id: 'g', kind: 'angle', a: 'A', b: 'B', value: 30 }).ok).toBe(false);
+    expect(addConstraint(docOf(A, B), { ...base, id: 'g', kind: 'angle', a: 'A', b: 'B', value: 200 }).ok).toBe(false);
+    expect(addConstraint(docOf(A), { ...base, id: 'r', kind: 'fixed-radius', shape: 'A', value: 5 }).ok).toBe(false);
+  });
+
+  it('line tangent to an arc (radius kept); coincident line end ↔ arc start; pinned arc centre', () => {
+    const L = createLine('L', vec(0, 0), vec(100, 5));
+    let d = ok(addConstraint(docOf(L, ARC), { ...base, id: 't', kind: 'tangent', a: 'L', b: 'ARC', internal: false }));
+    const arc = d.shapes.find((s) => s.id === 'ARC') as ArcShape;
+    const l = line(d, 'L');
+    const dist = Math.abs((l.end.x - l.start.x) * (arc.center.y - l.start.y) - (l.end.y - l.start.y) * (arc.center.x - l.start.x)) / lineLength(l);
+    expect(dist).toBeCloseTo(arc.radius, 6);
+    expect(arc.radius).toBe(20);
+    d = ok(addConstraint(docOf(L, ARC), { ...base, id: 'k', kind: 'coincident', p: { shapeId: 'L', key: 'end' }, q: { shapeId: 'ARC', key: 'start' } }));
+    const a2 = d.shapes.find((s) => s.id === 'ARC') as ArcShape;
+    expect(distance(line(d, 'L').end, arcStart(a2))).toBeLessThan(1e-6);
+    d = ok(addConstraint(docOf(ARC), { ...base, id: 'f', kind: 'fixed-position', p: { shapeId: 'ARC', key: 'center' }, x: 0, y: 0 }));
+    expect(distance((d.shapes[0] as ArcShape).center, vec(0, 0))).toBeLessThan(1e-6);
+  });
+
+  it('round-trip of the new constraint kinds through the file format', () => {
+    const d = { ...docOf({ ...A, layerId: 'layer-0' }, { ...B, layerId: 'layer-0' }, { ...ARC, layerId: 'layer-0' }), constraints: [
+      { ...base, id: 'r', kind: 'fixed-radius' as const, shape: 'ARC', value: 20 },
+      { ...base, id: 'g', kind: 'angle' as const, a: 'A', b: 'B', value: 42.5 },
+    ] };
+    expect(parseProject(serializeProject(d)).doc).toEqual(d);
+    const bad = JSON.parse(serializeProject(d));
+    bad.constraints[1].value = 181;
+    expect(() => parseProject(JSON.stringify(bad))).toThrow('constraints[1].value');
   });
 });

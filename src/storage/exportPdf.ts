@@ -1,6 +1,6 @@
 import type { Vec2 } from '../geometry/vec';
 import type { DrawingDocument } from '../model/types';
-import { drawingPrimitives, type Prim } from './drawingPrimitives';
+import { drawingPrimitives, sheetPrimitives, type Prim } from './drawingPrimitives';
 
 /**
  * Vector PDF export at TRUE SCALE.
@@ -25,16 +25,28 @@ export interface PdfOptions {
 
 // Helvetica advance widths (1/1000 em) for WinAnsi 32–126, plus ° and Ø.
 const W = [278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584];
-const EXTRA: Record<number, number> = { 0xb0: 400, 0xd8: 778 };
+// Helvetica widths for common WinAnsi characters above 126 (others default to 556).
+const EXTRA: Record<number, number> = {
+  0x80: 556, 0x85: 1000, 0x91: 222, 0x92: 222, 0x93: 333, 0x94: 333, 0x95: 350, 0x96: 556, 0x97: 1000, 0x99: 1000,
+  0xa0: 278, 0xa9: 737, 0xae: 737, 0xb0: 400, 0xb1: 584, 0xb2: 333, 0xb3: 333, 0xb5: 556, 0xb7: 278, 0xbc: 834, 0xbd: 834, 0xbe: 834,
+  0xd7: 584, 0xd8: 778, 0xdf: 611, 0xe4: 556, 0xe8: 556, 0xe9: 556, 0xf6: 556, 0xf7: 584, 0xfc: 556,
+};
 
-/** Map a Unicode string to WinAnsi codes for Helvetica (⌀ → Ø; unknown → ?). */
+/** Windows-1252 code points 0x80–0x9F that differ from Unicode. */
+const CP1252: Record<number, number> = {
+  0x20ac: 0x80, 0x201a: 0x82, 0x0192: 0x83, 0x201e: 0x84, 0x2026: 0x85, 0x2020: 0x86, 0x2021: 0x87, 0x02c6: 0x88, 0x2030: 0x89,
+  0x0160: 0x8a, 0x2039: 0x8b, 0x0152: 0x8c, 0x017d: 0x8e, 0x2018: 0x91, 0x2019: 0x92, 0x201c: 0x93, 0x201d: 0x94, 0x2022: 0x95,
+  0x2013: 0x96, 0x2014: 0x97, 0x02dc: 0x98, 0x2122: 0x99, 0x0161: 0x9a, 0x203a: 0x9b, 0x0153: 0x9c, 0x017e: 0x9e, 0x0178: 0x9f,
+};
+
+/** Map a Unicode string to WinAnsi (Windows-1252) codes for Helvetica. ⌀ → Ø; anything unsupported → ?. */
 export function toWinAnsi(s: string): number[] {
   return [...s].map((ch) => {
     if (ch === '⌀') return 0xd8;
     const c = ch.codePointAt(0)!;
     if (c >= 32 && c <= 126) return c;
-    if (c === 0xb0 || c === 0xd8) return c;
-    return 63; // '?'
+    if (c >= 0xa0 && c <= 0xff) return c; // Latin-1 is identical in WinAnsi
+    return CP1252[c] ?? 63; // '?'
   });
 }
 
@@ -112,9 +124,10 @@ function primOps(p: Prim): string {
       const r = (p.rotationDeg * Math.PI) / 180;
       const cos = Math.cos(r);
       const sin = Math.sin(r);
-      // Centre the text on pos (matches the screen/SVG rendering: middle anchor, central baseline).
-      const dx = -textWidthPt(codes, size) / 2;
-      const dy = -0.35 * size;
+      // Default: centre the text on pos (matches the screen/SVG rendering: middle anchor,
+      // central baseline). anchor 'start': left-aligned with the baseline at pos.
+      const dx = p.anchor === 'start' ? 0 : -textWidthPt(codes, size) / 2;
+      const dy = p.anchor === 'start' ? 0 : -0.35 * size;
       const x = pt(p.pos.x) + dx * cos - dy * sin;
       const y = pt(p.pos.y) + dx * sin + dy * cos;
       return `${rgb(p.color)} rg\nBT /F1 ${num(size)} Tf ${num(cos)} ${num(sin)} ${num(-sin)} ${num(cos)} ${num(x)} ${num(y)} Tm ${literal(codes)} Tj ET`;
@@ -127,31 +140,136 @@ const pdfDate = (d: Date) => {
   return `D:${d.getUTCFullYear()}${z(d.getUTCMonth() + 1)}${z(d.getUTCDate())}${z(d.getUTCHours())}${z(d.getUTCMinutes())}${z(d.getUTCSeconds())}Z`;
 };
 
-export function exportPdf(doc: DrawingDocument, opts: PdfOptions = {}): Uint8Array {
-  const layers = drawingPrimitives(doc);
-  const W_PT = pt(doc.page.widthMm);
-  const H_PT = pt(doc.page.heightMm);
+/**
+ * Print layouts:
+ *  - 'a3'       one page the size of the sheet, true scale (default);
+ *  - 'a4-tiled' the sheet split over A4 landscape pages at TRUE SCALE, with a 10 mm margin
+ *               (printer-safe), 10 mm overlap between neighbours, corner marks and labels;
+ *  - 'a4-fit'   the whole sheet reduced onto one A4 landscape page – marked NOT TO SCALE.
+ */
+export type PdfLayout = 'a3' | 'a4-tiled' | 'a4-fit';
 
-  // Object numbers: 1 catalog, 2 pages, 3 page, 4 font, 5 contents, 6 info, 7.. one OCG per layer.
-  const ocgNum = (i: number) => 7 + i;
-  const content = [
+export const A4_LANDSCAPE = { widthMm: 297, heightMm: 210 } as const;
+export const TILE_MARGIN_MM = 10;
+export const TILE_OVERLAP_MM = 10;
+
+export interface Tile {
+  readonly row: number;
+  readonly col: number;
+  /** Sheet region shown on this page (paper mm). */
+  readonly x0: number;
+  readonly y0: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+/** Tiles covering a sheet with A4 landscape pages (printable area minus margins, with overlap). */
+export function a4Tiles(sheetW: number, sheetH: number): Tile[] {
+  const pw = A4_LANDSCAPE.widthMm - 2 * TILE_MARGIN_MM;
+  const ph = A4_LANDSCAPE.heightMm - 2 * TILE_MARGIN_MM;
+  const step = (p: number) => p - TILE_OVERLAP_MM;
+  const count = (sheet: number, p: number) => (sheet <= p ? 1 : Math.ceil((sheet - TILE_OVERLAP_MM) / step(p)));
+  const cols = count(sheetW, pw);
+  const rows = count(sheetH, ph);
+  const tiles: Tile[] = [];
+  // Top row first (reading order); the last tile in each direction is aligned to the sheet edge.
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x0 = Math.min(c * step(pw), Math.max(0, sheetW - pw));
+      const yTop = Math.max(sheetH - r * step(ph), Math.min(sheetH, ph));
+      const y0 = Math.max(0, yTop - ph);
+      tiles.push({ row: r + 1, col: c + 1, x0, y0, w: Math.min(pw, sheetW), h: Math.min(ph, sheetH) });
+    }
+  }
+  return tiles;
+}
+
+const pdfDateFor = (opts: PdfOptions) => pdfDate(opts.date ?? new Date());
+
+export function exportPdf(doc: DrawingDocument, opts: PdfOptions & { layout?: PdfLayout } = {}): Uint8Array {
+  const layout = opts.layout ?? 'a3';
+  const layers = drawingPrimitives(doc);
+  const sheet = sheetPrimitives(doc);
+  const sheetW = doc.page.widthMm;
+  const sheetH = doc.page.heightMm;
+
+  // Optional content groups: one per visible layer (+ title block). Numbers assigned below.
+  const groups = [...(sheet.length ? [{ name: 'Title block' }] : []), ...layers.map(({ layer }) => ({ name: layer.name }))];
+  const drawingOps = [
     '1 J 1 j',
-    ...layers.map(({ items }, i) => [`/OC /L${i} BDC`, ...items.flatMap((it) => it.prims.map(primOps)).filter(Boolean), 'EMC'].join('\n')),
+    ...(sheet.length ? [[`/OC /L0 BDC`, ...sheet.map(primOps).filter(Boolean), 'EMC'].join('\n')] : []),
+    ...layers.map(({ items }, i) => [`/OC /L${i + (sheet.length ? 1 : 0)} BDC`, ...items.flatMap((it) => it.prims.map(primOps)).filter(Boolean), 'EMC'].join('\n')),
   ].join('\n');
 
-  const ocgRefs = layers.map((_, i) => `${ocgNum(i)} 0 R`).join(' ');
+  const label = (x: number, y: number, size: number, text: string) => `0 0 0 rg\nBT /F1 ${num(size)} Tf 1 0 0 1 ${num(pt(x))} ${num(pt(y))} Tm ${literal(toWinAnsi(text))} Tj ET`;
+
+  interface Page {
+    widthMm: number;
+    heightMm: number;
+    content: string;
+  }
+  let pages: Page[];
+  if (layout === 'a3') {
+    pages = [{ widthMm: sheetW, heightMm: sheetH, content: drawingOps }];
+  } else if (layout === 'a4-tiled') {
+    const tiles = a4Tiles(sheetW, sheetH);
+    const rows = Math.max(...tiles.map((t) => t.row));
+    const cols = Math.max(...tiles.map((t) => t.col));
+    const m = TILE_MARGIN_MM;
+    pages = tiles.map((t, i) => {
+      const mark = (x: number, y: number, dx: number, dy: number) => `${num(pt(x))} ${num(pt(y))} m ${num(pt(x + dx))} ${num(pt(y + dy))} l S`;
+      const W = m + t.w;
+      const H = m + t.h;
+      const marks = [
+        '0 0 0 RG 0.25 w',
+        mark(m, m, -5, 0), mark(m, m, 0, -5), mark(W, m, 5, 0), mark(W, m, 0, -5),
+        mark(m, H, -5, 0), mark(m, H, 0, 5), mark(W, H, 5, 0), mark(W, H, 0, 5),
+      ].join('\n');
+      const text = label(m, 4, 2.5, `Page ${i + 1} of ${tiles.length} – row ${t.row}/${rows}, column ${t.col}/${cols} – sheet x ${num(t.x0)}–${num(t.x0 + t.w)} mm, y ${num(t.y0)}–${num(t.y0 + t.h)} mm – print at 100 % (actual size); overlap ${TILE_OVERLAP_MM} mm`);
+      const content = [
+        'q',
+        `${num(pt(m))} ${num(pt(m))} ${num(pt(t.w))} ${num(pt(t.h))} re W n`,
+        `1 0 0 1 ${num(pt(m - t.x0))} ${num(pt(m - t.y0))} cm`,
+        drawingOps,
+        'Q',
+        marks,
+        text,
+      ].join('\n');
+      return { widthMm: A4_LANDSCAPE.widthMm, heightMm: A4_LANDSCAPE.heightMm, content };
+    });
+  } else {
+    const m = TILE_MARGIN_MM;
+    const k = Math.min((A4_LANDSCAPE.widthMm - 2 * m) / sheetW, (A4_LANDSCAPE.heightMm - 2 * m - 6) / sheetH);
+    const ox = (A4_LANDSCAPE.widthMm - sheetW * k) / 2;
+    const oy = m + 6;
+    const content = [
+      'q',
+      `${num(k)} 0 0 ${num(k)} ${num(pt(ox))} ${num(pt(oy))} cm`,
+      `0.6 0.6 0.6 RG ${num(pt(0.2 / k))} w 0 0 ${num(pt(sheetW))} ${num(pt(sheetH))} re S`,
+      drawingOps,
+      'Q',
+      label(m, m, 3.5, `NOT TO SCALE – sheet reduced to ${(k * 100).toFixed(1)} % to fit A4. Use the A3 or tiled A4 layout for true scale.`),
+    ].join('\n');
+    pages = [{ widthMm: A4_LANDSCAPE.widthMm, heightMm: A4_LANDSCAPE.heightMm, content }];
+  }
+
+  // Object numbers: 1 catalog, 2 pages, 3 font, 4 info, then OCGs, then (page, contents) pairs.
+  const ocgNum = (i: number) => 5 + i;
+  const pageNum = (i: number) => 5 + groups.length + 2 * i;
+  const ocgRefs = groups.map((_, i) => `${ocgNum(i)} 0 R`).join(' ');
+  const props = groups.map((_, i) => `/L${i} ${ocgNum(i)} 0 R`).join(' ');
   const objects: string[] = [
     `<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [${ocgRefs}] /D << /Order [${ocgRefs}] /ON [${ocgRefs}] >> >> >>`,
-    `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${num(W_PT)} ${num(H_PT)}] /Resources << /Font << /F1 4 0 R >> /Properties << ${layers
-      .map((_, i) => `/L${i} ${ocgNum(i)} 0 R`)
-      .join(' ')} >> >> /Contents 5 0 R >>`,
+    `<< /Type /Pages /Kids [${pages.map((_, i) => `${pageNum(i)} 0 R`).join(' ')}] /Count ${pages.length} >>`,
     `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>`,
-    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
     `<< /Title ${textString(opts.title ?? 'Drawing')} /Producer (A3 Precision Drawing Studio) /Creator (A3 Precision Drawing Studio) /Subject ${textString(
-      `A3 sheet ${doc.page.widthMm} x ${doc.page.heightMm} mm, scale ${doc.scale.paper}:${doc.scale.real}`,
-    )} /CreationDate (${pdfDate(opts.date ?? new Date())}) >>`,
-    ...layers.map(({ layer }) => `<< /Type /OCG /Name ${textString(layer.name)} >>`),
+      `A3 sheet ${sheetW} x ${sheetH} mm, scale ${doc.scale.paper}:${doc.scale.real}, layout ${layout}`,
+    )} /CreationDate (${pdfDateFor(opts)}) >>`,
+    ...groups.map((g) => `<< /Type /OCG /Name ${textString(g.name)} >>`),
+    ...pages.flatMap((pg, i) => [
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${num(pt(pg.widthMm))} ${num(pt(pg.heightMm))}] /Resources << /Font << /F1 3 0 R >> /Properties << ${props} >> >> /Contents ${pageNum(i) + 1} 0 R >>`,
+      `<< /Length ${pg.content.length} >>\nstream\n${pg.content}\nendstream`,
+    ]),
   ];
 
   // Assemble with exact byte offsets (everything is 8-bit; the content is ASCII).
@@ -164,7 +282,7 @@ export function exportPdf(doc: DrawingDocument, opts: PdfOptions = {}): Uint8Arr
   const xref = out.length;
   out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
   for (const o of offsets) out += `${String(o).padStart(10, '0')} 00000 n \n`;
-  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info 6 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info 4 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
 
   const bytes = new Uint8Array(out.length);
   for (let i = 0; i < out.length; i++) bytes[i] = out.charCodeAt(i) & 0xff;

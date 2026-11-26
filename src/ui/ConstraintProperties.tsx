@@ -42,6 +42,12 @@ export function ConstraintProperties({ c, doc, dispatch }: { c: Constraint; doc:
       {c.kind === 'fixed-angle' && (
         <NumberField label="Angle" unit="°" testId="constraint-value" value={c.value} onCommit={(v) => apply({ ...c, value: v })} title="Driving value – degrees counter-clockwise from +X" />
       )}
+      {c.kind === 'fixed-radius' && (
+        <NumberField label="Radius" testId="constraint-value" min={0.000001} value={c.value} onCommit={(v) => apply({ ...c, value: v })} title="Driving value – the circle/arc is changed to this radius" />
+      )}
+      {c.kind === 'angle' && (
+        <NumberField label="Angle" unit="°" testId="constraint-value" min={0} value={c.value} onCommit={(v) => (v <= 180 ? apply({ ...c, value: v }) : dispatch({ type: 'setMessage', message: '⚠ Angle must be between 0° and 180°' }))} title="Driving value – angle between the two lines' directions, 0–180°" />
+      )}
       {c.kind === 'fixed-position' && (
         <div className="field-grid">
           <NumberField label="X" testId="constraint-x" value={c.x} onCommit={(v) => apply({ ...c, x: v })} />

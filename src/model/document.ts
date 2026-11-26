@@ -6,10 +6,10 @@ import { duplicateShape } from './operations';
 import { shapeBounds } from './shapes';
 import { copyDimensions, dimensionShapeIds } from './dimensions';
 import { constraintShapeIds } from './layers';
-import { DEFAULT_LAYER, type Dimension, type DrawingDocument, type Shape, type ShapeId } from './types';
+import { DEFAULT_LAYER, DEFAULT_TITLE_BLOCK, type Dimension, type DrawingDocument, type Shape, type ShapeId } from './types';
 
 export function createEmptyDocument(): DrawingDocument {
-  return { page: A3_LANDSCAPE, scale: SCALE_1_1, shapes: [], dimensions: [], layers: [DEFAULT_LAYER], constraints: [] };
+  return { page: A3_LANDSCAPE, scale: SCALE_1_1, shapes: [], dimensions: [], layers: [DEFAULT_LAYER], constraints: [], titleBlock: DEFAULT_TITLE_BLOCK };
 }
 
 export const findShape = (doc: DrawingDocument, id: ShapeId): Shape | undefined => doc.shapes.find((s) => s.id === id);

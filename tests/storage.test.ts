@@ -55,7 +55,7 @@ describe('project file v3: round trip', () => {
     expect(back.doc).toEqual(doc);
     expect(back.settings).toEqual(settings);
     expect(back.warnings).toEqual([]);
-    expect(back.sourceVersion).toBe(3);
+    expect(back.sourceVersion).toBe(FILE_FORMAT_VERSION);
   });
 
   it('saving and re-saving is stable (byte-identical)', () => {
@@ -81,7 +81,7 @@ describe('opening older project files (migration)', () => {
     expect(p.doc.dimensions).toEqual([]);
     expect(p.doc.constraints).toEqual([]);
     expect(p.settings.display).toEqual(DEFAULT_DISPLAY);
-    expect(p.warnings[0]).toMatch(/Upgraded from format version 1 to 3/);
+    expect(p.warnings[0]).toMatch(/Upgraded from format version 1 to 4/);
   });
 
   it('Milestone 2 (v2) file: dimensions stay linked and measure the same values', () => {

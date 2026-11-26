@@ -2,6 +2,8 @@ import { angleBetweenPoints, rotatePoint, rotateVec, snapAngle } from '../geomet
 import { boundsCenter, unionBounds, type Bounds } from '../geometry/bounds';
 import { add, midpoint, vec, type Vec2 } from '../geometry/vec';
 import { moveShape, resizeBoundsByHandle, resizeRectByHandle, rotateShape, scaleShape, uniformScaleFactor, type BoxHandle } from './operations';
+import { normalizeAngle } from '../geometry/angles';
+import { arcEnd, arcMid, arcStart, normalizeArc } from './arcs';
 import { rectCorners, shapeBounds, shapeCenter } from './shapes';
 import type { Shape } from './types';
 
@@ -9,17 +11,17 @@ import type { Shape } from './types';
  * Selection handles, computed in WORLD coordinates from the model.
  * The UI converts them to screen positions for drawing and hit testing.
  */
-export type HandleId = BoxHandle | 'start' | 'end' | 'rotate' | 'move';
+export type HandleId = BoxHandle | 'start' | 'end' | 'rotate' | 'move' | 'radius';
 
 /** Grips move a point of the geometry exactly to the (snapped) cursor; the others resize/rotate. */
-export const isGrip = (id: HandleId): boolean => id === 'start' || id === 'end' || id === 'move';
+export const isGrip = (id: HandleId): boolean => id === 'start' || id === 'end' || id === 'move' || id === 'radius';
 
 export interface Handle {
   readonly id: HandleId;
   readonly position: Vec2;
 }
 
-export type FrameMode = 'line' | 'rect' | 'circle' | 'box' | 'multi';
+export type FrameMode = 'line' | 'rect' | 'circle' | 'arc' | 'box' | 'multi';
 
 export interface SelectionFrame {
   readonly mode: FrameMode;
@@ -97,6 +99,21 @@ export function getSelectionFrame(shapes: readonly Shape[], rotateOffset: number
             { id: 's', position: vec(c.x, c.y - r) },
             { id: 'w', position: vec(c.x - r, c.y) },
             { id: 'move', position: c },
+          ],
+        };
+      }
+      case 'arc': {
+        const b = shapeBounds(s);
+        return {
+          mode: 'arc',
+          outline: boxCorners(b),
+          pivot: s.center,
+          handles: [
+            { id: 'start', position: arcStart(s) },
+            { id: 'end', position: arcEnd(s) },
+            { id: 'radius', position: arcMid(s) },
+            { id: 'move', position: s.center },
+            { id: 'rotate', position: add(arcMid(s), vec(0, rotateOffset)) },
           ],
         };
       }
@@ -179,6 +196,24 @@ export function applyHandleDrag(
       return [resizeRectByHandle(s, handle as BoxHandle, p)];
     case 'circle':
       return [{ ...s, radius: Math.hypot(p.x - s.center.x, p.y - s.center.y) }];
+    case 'arc': {
+      const ang = (Math.atan2(p.y - s.center.y, p.x - s.center.x) * 180) / Math.PI;
+      if (handle === 'radius') {
+        const r = Math.hypot(p.x - s.center.x, p.y - s.center.y);
+        return [r > 1e-9 ? { ...s, radius: r } : s];
+      }
+      if (handle === 'start') {
+        // Move the start along the circle, keeping the end where it is.
+        const endDeg = s.startDeg + s.sweepDeg;
+        const sweep = normalizeAngle(endDeg - ang);
+        return [sweep > 1e-6 ? normalizeArc({ ...s, startDeg: ang, sweepDeg: sweep }) : s];
+      }
+      if (handle === 'end') {
+        const sweep = normalizeAngle(ang - s.startDeg);
+        return [sweep > 1e-6 ? { ...s, sweepDeg: sweep } : s];
+      }
+      return [s];
+    }
     case 'polyline':
       if (handle === 'start' || handle === 'end') {
         const pts = [...s.points];

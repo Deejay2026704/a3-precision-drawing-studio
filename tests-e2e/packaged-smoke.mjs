@@ -183,7 +183,7 @@ try {
   await win.click('[data-testid=file-menu-button]');
   await win.click('[data-testid=menu-save-as]');
   await sleep(800);
-  check('Save As writes the project file', existsSync(proj) && JSON.parse(readFileSync(proj, 'utf8')).formatVersion === 3);
+  check('Save As writes the project file', existsSync(proj) && JSON.parse(readFileSync(proj, 'utf8')).formatVersion === 4);
   check('after saving, no recovery copy is left', listAutosaves().length === 0, JSON.stringify(listAutosaves()));
   await win.click('[data-testid=file-menu-button]');
   await win.click('[data-testid=menu-new]');

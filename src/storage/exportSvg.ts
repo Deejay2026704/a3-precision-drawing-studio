@@ -1,6 +1,6 @@
 import { vec, type Vec2 } from '../geometry/vec';
 import type { DrawingDocument } from '../model/types';
-import { drawingPrimitives, type Prim } from './drawingPrimitives';
+import { drawingPrimitives, sheetPrimitives, type Prim } from './drawingPrimitives';
 
 /**
  * Export the drawing as an SVG sized to the physical sheet (420 × 297 mm).
@@ -47,11 +47,14 @@ export function exportSvg(doc: DrawingDocument): string {
       }
       case 'text': {
         const t = F(p.pos);
-        return `<text x="${n(t.x)}" y="${n(t.y)}" font-size="${n(p.height)}" font-family="Arial, sans-serif" fill="${esc(p.color)}" text-anchor="middle" dominant-baseline="central" transform="rotate(${n(-p.rotationDeg)} ${n(t.x)} ${n(t.y)})">${esc(p.text)}</text>`;
+        const align = p.anchor === 'start' ? 'text-anchor="start"' : 'text-anchor="middle" dominant-baseline="central"';
+        return `<text x="${n(t.x)}" y="${n(t.y)}" font-size="${n(p.height)}" font-family="Arial, sans-serif" fill="${esc(p.color)}" ${align} transform="rotate(${n(-p.rotationDeg)} ${n(t.x)} ${n(t.y)})">${esc(p.text)}</text>`;
       }
     }
   };
 
+  const sheet = sheetPrimitives(doc);
+  const sheetGroup = sheet.length ? [`  <g id="title-block">\n    ${sheet.map((p) => prim(p, null)).join('\n    ')}\n  </g>`] : [];
   const groups = drawingPrimitives(doc).map(({ layer, items }) => {
     const body = items.map((it) =>
       it.kind === 'shape' ? it.prims.map((p) => prim(p, it.id)).join('') : `<g class="dimension" data-id="${esc(it.id)}">${it.prims.map((p) => prim(p, null)).join('')}</g>`,
@@ -64,6 +67,7 @@ export function exportSvg(doc: DrawingDocument): string {
     `<svg xmlns="http://www.w3.org/2000/svg" width="${n(doc.page.widthMm)}mm" height="${n(doc.page.heightMm)}mm" viewBox="0 0 ${n(doc.page.widthMm)} ${n(doc.page.heightMm)}">`,
     `  <title>A3 Precision Drawing Studio export – scale ${doc.scale.paper}:${doc.scale.real}</title>`,
     `  <rect width="${n(doc.page.widthMm)}" height="${n(doc.page.heightMm)}" fill="#ffffff"/>`,
+    ...sheetGroup,
     ...groups,
     `</svg>`,
     '',

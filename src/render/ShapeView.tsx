@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { worldToScreen, type ViewTransform } from '../geometry/coords';
 import { pxPerPageMm } from '../geometry/viewport';
 import { pxPerWorldMm } from '../geometry/coords';
+import { arcEnd, arcStart } from '../model/arcs';
 import { rectCorners } from '../model/shapes';
 import type { Shape } from '../model/types';
 
@@ -43,6 +44,13 @@ export const ShapeView = memo(function ShapeView({ shape, transform, stroke, das
     case 'circle': {
       const c = S(shape.center);
       return <circle {...common} cx={c.x} cy={c.y} r={shape.radius * pxPerWorldMm(transform)} />;
+    }
+    case 'arc': {
+      const a = S(arcStart(shape));
+      const b = S(arcEnd(shape));
+      const rp = shape.radius * pxPerWorldMm(transform);
+      // World CCW stays CCW on screen after the Y flip → SVG sweep-flag 0.
+      return <path {...common} d={`M ${a.x} ${a.y} A ${rp} ${rp} 0 ${shape.sweepDeg > 180 ? 1 : 0} 0 ${b.x} ${b.y}`} />;
     }
     case 'polyline':
       return <polyline {...common} points={pts(shape.points.map(S))} />;
