@@ -3,9 +3,10 @@
 A Windows desktop application for precise 2D drawing and editing on an A3 sheet.
 It is a precision drawing tool (CAD-style), **not** a publishing application.
 
-Current state: **Milestone 4** — Windows and macOS installers, true-scale PDF export
-and autosave with crash recovery, on top of Milestones 1–3 (drawing, editing, snaps,
-dimensions, constraints, layers, robust project files). See `DEVELOPMENT_STATUS.md`.
+Current state: **Milestone 5** — arcs, trimming circles, fillet/chamfer, radius and
+angle constraints, a title block, A4 print layouts and auto-update, on top of
+Milestones 1–4 (drawing, editing, snaps, dimensions, constraints, layers, robust project
+files, installers, PDF export, autosave). See `DEVELOPMENT_STATUS.md`.
 
 ## Installing (end users)
 
@@ -23,8 +24,34 @@ For a `v*` tag they are also attached to a GitHub Release.
   notarised**, so the first time: right-click the app ▸ *Open* ▸ *Open* (or System
   Settings ▸ Privacy & Security ▸ *Open Anyway*).
 
-Signing/notarisation is enabled automatically when certificates are provided as CI
-secrets (see `electron-builder.config.cjs`).
+**Updates.** The installed app checks GitHub Releases a few seconds after it starts
+(and on File ▸ *Check for updates…*). Nothing is downloaded without asking: a notice
+offers the new version. On **Windows**, *Download and install* fetches it (checked against
+its SHA-512) and it installs when you choose *Restart now* — or the next time you quit.
+On **macOS** the app can only update itself in place when it is signed with an Apple
+Developer ID; until then the notice offers *Open download page* for the new DMG.
+A check never interrupts work and a failed background check is silent.
+
+### Code signing (needs your certificates)
+
+The builds are unsigned until certificates are supplied. Add these **repository secrets**
+(GitHub ▸ Settings ▸ Secrets and variables ▸ Actions); the workflow uses them
+automatically, and builds stay unsigned while they are absent. Never commit them.
+
+| Secret | Purpose |
+| --- | --- |
+| `WIN_CSC_LINK` | Windows code-signing certificate (`.pfx`), base64-encoded |
+| `WIN_CSC_KEY_PASSWORD` | its password |
+| `MAC_CSC_LINK` | "Developer ID Application" certificate (`.p12`), base64-encoded |
+| `MAC_CSC_KEY_PASSWORD` | its password |
+| `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | notarisation by Apple |
+
+With a Windows certificate, SmartScreen warnings stop (immediately for EV certificates,
+after reputation builds for standard ones), and updates are only accepted when signed by
+the same publisher. With a Developer ID and notarisation, Gatekeeper opens the app
+normally and in-place updates switch on for macOS automatically. To publish a release,
+push a tag such as `v0.5.0`: the CI release job attaches the installers and the update
+feed (`latest.yml`, `latest-mac.yml`, `.blockmap`).
 
 ---
 
@@ -44,7 +71,7 @@ npm run dist:win   # Windows NSIS installer (run on Windows)  → release/
 npm run dist:mac   # macOS DMG + ZIP (run on a Mac)           → release/
 npm run dist:dir   # unpacked app for the current OS (testing)
 npm run e2e:packaged -- "<app executable>"   # smoke-test an installed/packaged app
-npm run e2e        # all end-to-end suites (M1–M4) driving the real Electron window (needs `playwright`)
+npm run e2e        # all end-to-end suites (M1–M5) driving the real Electron window (needs `playwright`)
 ```
 
 Screenshots taken from the real app during verification are in `docs/screenshots/`.
@@ -59,7 +86,8 @@ On Linux when running as root (e.g. in a container) Electron needs
 | Action | How |
 | --- | --- |
 | Select tool | Home ▸ Select, or `V` / `Esc` |
-| Line / Rectangle / Circle / Freehand | Draw ribbon, or `L` / `R` / `C` / `F` |
+| Line / Rectangle / Circle / Arc / Freehand | Draw ribbon, or `L` / `R` / `C` / `A` / `F` |
+| Arc | `A`, then click the start, a point on the arc, and the end (3 points). Or type centre, radius, start angle and sweep in Properties ▸ "by numbers" (angles counter-clockwise from +X) |
 | Draw | press, drag, release on the sheet. `Shift` = 15° angle steps for lines, square for rectangles |
 | Select multiple | `Shift`/`Ctrl` + click, or drag a selection window over empty space |
 | Move | drag a selected object; arrow keys nudge 1 mm (`Shift` = 10 mm) |
@@ -77,16 +105,20 @@ On Linux when running as root (e.g. in a container) Electron needs
 | Draw by numbers | with Line / Rectangle / Circle active, type values in Properties ▸ "by numbers" and press **Create** |
 | Object snaps | Draw ▸ Snap: Endpoint, Midpoint, Centre, Intersection, Perpendicular, Tangent, Nearest (each toggleable). `F3` or **OSNAP** in the status bar toggles all |
 | Grid snap / grid | `F9` or **GRID** in the status bar; increment on Draw ▸ Snap ▸ Step. Grid spacing on View ▸ Show |
-| Trim / Extend | `T` / `E`, then click the part of a line to remove / near the end to extend |
+| Trim / Extend | `T` / `E`, then click the part to remove / near the end to extend. Trim works on lines, circles (the circle becomes an arc; it needs two crossings) and arcs. The part that will go is shown dashed red before you click |
+| Fillet / Chamfer | Draw ▸ Modify ▸ Fillet or Chamfer. Set the radius / distance in Properties, then click the two lines on the parts to keep. The lines are trimmed and an arc (fillet) or a line (chamfer) is added in one undo step. 0 = sharp corner |
 | Offset | `O`, set the distance on Draw ▸ Modify, click an object, then the side |
 | Mirror | `M`; with objects selected (or Shift+click them in the tool) click two points on the mirror line. "Mirror keeps source" = copy |
 | Grips | select an object: filled squares are grips — line ends, polyline ends, centre/midpoint (move). Grips snap |
 | Dimensions | Annotate tab: Aligned (`D`), Horizontal, Vertical (3 clicks: point, point, placement), Angular (line, line, placement), Radius / Diameter (click a circle) |
 | Layers | Layers panel (top right): **+** new, ✎ rename (or double-click a name), ▲▼ reorder, 🗑 delete; per layer 👁 show/hide, 🔒 lock, colour. Click a row to make it the **active layer** for new objects |
 | Move objects to a layer | select them, Properties ▸ **Layer** |
-| Driving constraints | **Constrain** tab. Select a line (Horizontal, Vertical, Fixed length, Fixed angle), two lines (Parallel, Perpendicular, Equal length) or a line + circle / two circles (Tangent); or use the Coincident / Fix Position tools and click points. Disabled buttons say what to select |
-| Edit a constraint | click its purple marker: Properties shows status, value (fixed length/angle/position), Suppress, Delete |
-| Export PDF | File ▸ Export PDF… (`Ctrl+P`): vector PDF, A3 at true scale, visible layers only (each a PDF layer). Print at **100 % / Actual size** |
+| Driving constraints | **Constrain** tab. Select a line (Horizontal, Vertical, Fixed length, Fixed angle), two lines (Parallel, Perpendicular, Equal length, **Angle between lines**), a circle or arc (**Fixed radius**) or a line + circle/arc / two circles/arcs (Tangent); or use the Coincident / Fix Position tools and click points. Disabled buttons say what to select |
+| Edit a constraint | click its purple marker: Properties shows status, value (length, angle, radius, angle between lines 0–180°, position), Suppress, Delete |
+| Title block | click an empty part of the sheet: Properties ▸ **Title block** ▸ Show. Fill in title, drawing number, revision, drawn/checked by, date (today's date is filled in) and company. Scale and sheet size are filled in automatically. It is printed and exported with the drawing |
+| Export PDF | File ▸ Export PDF (A3, true scale)… (`Ctrl+P`): vector PDF, visible layers only (each a PDF layer). Print at **100 % / Actual size** |
+| No A3 printer | File ▸ Export PDF for an A4 printer…: **Tiled** = 4 A4 landscape pages at true scale with 10 mm overlap, corner marks and "Page i of 4 – row/column" labels (print at 100 %, trim and tape); **Fit** = the whole sheet reduced onto one A4 page, marked NOT TO SCALE |
+| Updates | File ▸ Check for updates… (see *Updates* above) |
 | Export SVG | File ▸ Export SVG… (visible layers only, true scale in mm) |
 | Autosave | on by default, every 2 minutes while there are unsaved changes; File ▸ *Autosave: On/Off*; status bar shows the last autosave |
 | Crash recovery | after a crash, the next start offers **Recover / Keep for later / Discard**. A recovered drawing opens *unsaved*; the first Save asks before writing over the original |
@@ -217,6 +249,17 @@ to or over the user's `.a3d`. They are written atomically, removed after Save, a
 *Don't save*/New/Open, and on a normal quit; a crash leaves them for recovery. A recovered
 backup is handed to the new session *before* the old copy is deleted, so a copy always exists.
 
+### Milestone 5 modules
+
+| Module | Responsibility |
+| --- | --- |
+| `geometry/arc.ts`, `model/arcs.ts` | arc maths: points/angles on arcs, sweep tests, 3-point arcs, bounds |
+| `model/curves.ts` | trimming circles and arcs; fillet and chamfer between two lines |
+| `model/titleBlock.ts`, `render/SheetView.tsx` | frame + title block layout (paper mm), shared by canvas, SVG and PDF |
+| `storage/exportPdf.ts` | now also A4 tiled (true scale) and A4 fit layouts; full Windows-1252 text |
+| `electron/updatePolicy.ts`, `electron/updater.ts`, `ui/UpdateBanner.tsx` | auto-update (electron-updater, GitHub Releases), consent-first |
+| `tests-e2e/milestone5.mjs`, `tests-e2e/update-e2e.mjs` | M5 end-to-end suite; installed-app update test against a local update server (CI) |
+
 ### Drawing objects (all in world mm)
 
 | Kind | Stored geometry |
@@ -224,6 +267,7 @@ backup is handed to the new session *before* the old copy is deleted, so a copy 
 | Line | `start`, `end` |
 | Rectangle | `origin` (base corner), `width`, `height`, `rotationDeg` (about `origin`) |
 | Circle | `center`, `radius` |
+| Arc | `center`, `radius`, `startDeg` (0–360), `sweepDeg` (0–360, counter-clockwise) |
 | Freehand polyline | `points[]` |
 
 Each object also has a style: stroke colour and line weight in **paper** mm
@@ -232,14 +276,15 @@ Each object also has a style: stroke colour and line weight in **paper** mm
 ### Project folder structure
 
 ```
-electron/            main.ts (window, dialogs, IPC, file association), preload.ts, atomicWrite.ts, autosaveStore.ts
+electron/            main.ts (window, dialogs, IPC, file association), preload.ts, atomicWrite.ts, autosaveStore.ts,
+                     updater.ts + updatePolicy.ts (auto-update)
 build/               installer resources: icon.svg/png, entitlements.mac.plist
 .github/workflows/   installers.yml (CI build, install and smoke test on Windows + macOS)
 scripts/             dev.mjs (Vite + Electron dev runner), build-electron.mjs, electron-build.mjs
 src/
   geometry/          vec, angles, bounds, page (A3), scale, viewport, coords, intersect
   model/             types, shapes, operations, handles, hitTest, document,
-                     anchors, snap, dimensions, modify, layers, constraints
+                     anchors, snap, dimensions, modify, layers, constraints, arcs, curves, titleBlock
   storage/           documentStorage (schema, migration, validation), drawingPrimitives, exportSvg,
                      exportPdf, autosave, fileService (IPC adapter)
   render/            ShapeView, PageView, GridView, Rulers, SelectionOverlay, rulerTicks
@@ -248,23 +293,25 @@ src/
   ui/interaction/    toolSession (click-driven modify/dimension tools)
   main.tsx           renderer entry
 tests/               Vitest unit tests (no UI, no DOM); tests/fixtures: real M1 (v1) and M2 (v2) files
-tests-e2e/           Playwright scripts that drive the real Electron window (M1–M4) + packaged-app smoke test
+tests-e2e/           Playwright scripts that drive the real Electron window (M1–M5), packaged-app smoke test, update test
 docs/screenshots/    screenshots captured by the end-to-end run
 ```
 
 ### File format
 
-`*.a3d` — UTF-8 JSON, format version 3:
+`*.a3d` — UTF-8 JSON, format version 4 (v4 added arcs, the fixed-radius and angle
+constraints and `titleBlock`):
 
 ```
-{ format: "a3-precision-drawing", formatVersion: 3, units: "mm",
+{ format: "a3-precision-drawing", formatVersion: 4, units: "mm",
   page: { widthMm, heightMm, orientation }, scale: { paper, real },
   layers: [{ id, name, visible, locked, color }],
   shapes: [... each with layerId], dimensions: [... each with layerId], constraints: [...],
+  titleBlock: { visible, title, drawingNumber, revision, drawnBy, checkedBy, date, company },
   settings: { activeLayerId, display: { showGrid, gridSpacingMm, gridSnap, gridSnapStepMm, objectSnap, osnap } } }
 ```
 
-* **Migration:** v1 (M1) and v2 (M2) files open and are migrated in memory (default layer,
+* **Migration:** v1 (M1), v2 (M2) and v3 (M3/M4) files open and are migrated in memory (default layer,
   no constraints, default display settings); the user is told, and saving over an older
   file asks before upgrading it. Files from a newer version are refused.
 * **Validation:** every field is checked; errors name the exact path (e.g.
@@ -273,7 +320,8 @@ docs/screenshots/    screenshots captured by the end-to-end run
 * **Saving:** atomic (temporary file, flush, rename) — a failed save never damages the
   existing file. An unchanged project saves byte-for-byte identically (canonical key order).
 * **Unsaved changes:** "Unsaved changes" badge in the title bar; New/Open ask Save /
-  Don't save / Cancel; closing the window asks too. There is no autosave yet.
+  Don't save / Cancel; closing the window asks too. Autosave (M4) keeps a separate
+  recovery copy.
 
 ### Technical risks identified (and mitigations)
 
@@ -285,5 +333,5 @@ docs/screenshots/    screenshots captured by the end-to-end run
 | Rotated rectangles under non-uniform scaling are no longer rectangles | Single rectangles resize in their own local frame; multi-selection scales proportionally only |
 | Scale change accidentally rescaling geometry | Scale stored separately; `setScale` only touches `doc.scale` (tested) |
 | Electron security (renderer with Node access) | `contextIsolation`, `sandbox`, no `nodeIntegration`; narrow preload API |
-| Windows packaging/signing not verifiable in a Linux CI container | Milestone 1 targets `npm run dev`; installer packaging is a later milestone |
+| Windows packaging/signing not verifiable in a Linux CI container | Installers are built, installed, smoke-tested and auto-updated on real Windows and macOS CI runners |
 | Very thin lines invisible at low zoom | Rendered stroke clamped to ≥ 0.5 px on screen only; stored weight unchanged |

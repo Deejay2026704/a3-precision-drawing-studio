@@ -34,7 +34,7 @@ button, select, input { font: inherit; color: inherit; }
 .menu-sep { height: 1px; background: #e3e3e3; margin: 4px 0; }
 
 /* ribbon */
-.ribbon { display: flex; align-items: stretch; min-height: 86px; background: #fff; border-bottom: 1px solid var(--chrome-border); padding: 4px 6px; gap: 4px; }
+.ribbon { display: flex; align-items: stretch; height: 86px; box-sizing: border-box; overflow-x: auto; overflow-y: hidden; background: #fff; border-bottom: 1px solid var(--chrome-border); padding: 4px 6px; gap: 4px; }
 .ribbon-group { display: flex; flex-direction: column; padding: 0 6px; border-right: 1px solid #e3e3e3; }
 .ribbon-group-body { flex: 1; display: flex; align-items: center; gap: 2px; }
 .ribbon-group-title { text-align: center; font-size: 11px; color: var(--muted); padding-top: 2px; }
@@ -195,6 +195,12 @@ button, select, input { font: inherit; color: inherit; }
 .workspace { overflow: hidden; }
 .ribbon { overflow-x: auto; min-width: 0; }
 .app { grid-template-columns: minmax(0, 1fr); }
+
+/* The ribbon never changes height (that would move the drawing): on narrow windows or
+   with wider system fonts it scrolls sideways with a thin scrollbar instead. */
+.ribbon::-webkit-scrollbar { height: 6px; }
+.ribbon::-webkit-scrollbar-thumb { background: #c6c9ce; border-radius: 3px; }
+.ribbon-group { flex-shrink: 0; }
 
 /* Update notice (non-modal) */
 .update-banner { position: fixed; left: 12px; bottom: 36px; z-index: 50; display: flex; align-items: center; gap: 8px; max-width: 60vw;

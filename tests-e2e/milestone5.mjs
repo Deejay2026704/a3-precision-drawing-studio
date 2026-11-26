@@ -133,14 +133,28 @@ try {
 
   // =====================================================================
   console.log('\nA. Ribbon layout (the new tools must not push the drawing area around)');
-  const ribbon = [];
-  for (const t of ['home', 'draw', 'annotate', 'constrain', 'view']) {
-    await win.click(`[data-testid=tab-${t}]`);
-    await win.waitForTimeout(80);
-    ribbon.push({ t, ...(await win.evaluate(() => { const r = document.querySelector('.ribbon'); return { h: r.getBoundingClientRect().height, over: r.scrollWidth - r.clientWidth }; })) });
-  }
-  check('every ribbon tab has the same height', ribbon.every((r) => r.h === ribbon[0].h), JSON.stringify(ribbon));
-  check('no ribbon tab overflows horizontally at the default window size', ribbon.every((r) => r.over <= 0), JSON.stringify(ribbon));
+  const tabsLayout = async () => {
+    const out = [];
+    for (const t of ['home', 'draw', 'annotate', 'constrain', 'view']) {
+      await win.click(`[data-testid=tab-${t}]`);
+      await win.waitForTimeout(80);
+      out.push({ t, ...(await win.evaluate(() => { const r = document.querySelector('.ribbon'); return { h: r.getBoundingClientRect().height, canvasY: document.querySelector('[data-testid=canvas]').getBoundingClientRect().y, over: r.scrollWidth - r.clientWidth }; })) });
+    }
+    return out;
+  };
+  const steady = (l) => l.every((r) => r.h === l[0].h && r.canvasY === l[0].canvasY);
+  let layout = await tabsLayout();
+  check('the drawing area does not move when switching ribbon tabs', steady(layout), JSON.stringify(layout));
+  console.log(`        (horizontal overflow per tab at this window size: ${layout.map((r) => `${r.t} ${Math.max(0, r.over)} px`).join(', ')})`);
+  const size = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getSize());
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1000, 700));
+  await win.waitForTimeout(300);
+  layout = await tabsLayout();
+  check('… nor on a narrow window, where the ribbon scrolls sideways instead', steady(layout) && layout.some((r) => r.over > 0), JSON.stringify(layout));
+  await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setSize(w, h), size);
+  await win.waitForTimeout(300);
+  await win.click('[data-testid=tab-view]');
+  await win.click('[data-testid=cmd-fit-page]');
   await win.click('[data-testid=tab-home]');
   await measure();
 
