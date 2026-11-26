@@ -3,7 +3,9 @@ import { boundsHeight, boundsWidth } from '../geometry/bounds';
 import { formatScale, pageLengthToWorld, worldLengthToPage, type DrawingScale } from '../geometry/scale';
 import { formatNumber } from '../geometry/units';
 import { vec } from '../geometry/vec';
-import { getShapes, selectionBounds } from '../model/document';
+import { getDimensions, getShapes, selectionBounds } from '../model/document';
+import { CreateByNumbers } from './CreateByNumbers';
+import { DimensionProperties, DimensionStyleFields } from './DimensionProperties';
 import {
   moveBoundsTo,
   moveShape,
@@ -16,7 +18,7 @@ import {
   setRectSize,
 } from '../model/operations';
 import { lineAngle, lineLength, polylineLength, shapeBounds } from '../model/shapes';
-import { LINE_WEIGHTS, SHAPE_KIND_LABELS, type Shape, type ShapeStyle } from '../model/types';
+import { LINE_WEIGHTS, SHAPE_KIND_LABELS, type Shape, type ShapeId, type ShapeStyle } from '../model/types';
 import { NumberField } from './NumberField';
 import type { EditorAction, EditorState } from './state/editorReducer';
 
@@ -30,17 +32,32 @@ export const PEN_COLOURS: { value: string; label: string }[] = [
 ];
 
 /** Properties panel: exact numeric entry for the selected object(s), in drawing millimetres. */
-export function PropertiesPanel({ state, dispatch }: { state: EditorState; dispatch: Dispatch<EditorAction> }) {
-  const { doc, selection } = state;
+export function PropertiesPanel({ state, dispatch, newId }: { state: EditorState; dispatch: Dispatch<EditorAction>; newId: () => ShapeId }) {
+  const { doc, selection, tool } = state;
   const shapes = getShapes(doc, selection);
+  const dims = getDimensions(doc, selection);
   const update = (s: Shape[], message: string) => dispatch({ type: 'updateShapes', shapes: s, message });
 
   return (
     <aside className="properties" data-testid="properties-panel">
       <h2 className="panel-title">Properties</h2>
-      {shapes.length === 0 && <DocumentProperties state={state} />}
+      {(tool === 'line' || tool === 'rect' || tool === 'circle') && (
+        <CreateByNumbers key={tool} tool={tool} style={state.drawStyle} dispatch={dispatch} newId={newId} />
+      )}
+      {shapes.length === 0 && dims.length === 0 && <DocumentProperties state={state} />}
+      {shapes.length === 0 && dims.length === 1 && <DimensionProperties dim={dims[0]} doc={doc} dispatch={dispatch} />}
+      {shapes.length === 0 && dims.length > 1 && (
+        <>
+          <section className="panel-section" data-testid="props-multi-dim">
+            <h3>{dims.length} dimensions selected</h3>
+            <p className="hint">Driven dimensions: values are measured from geometry.</p>
+          </section>
+          <DimensionStyleFields dims={dims} dispatch={dispatch} />
+        </>
+      )}
       {shapes.length === 1 && <SingleShapeProperties shape={shapes[0]} scale={doc.scale} update={update} />}
       {shapes.length > 1 && <MultiProperties state={state} shapes={shapes} update={update} />}
+      {shapes.length > 0 && dims.length > 0 && <p className="hint">+ {dims.length} dimension{dims.length === 1 ? '' : 's'} in the selection</p>}
       {shapes.length > 0 && <StyleProperties shapes={shapes} update={update} />}
     </aside>
   );

@@ -1,13 +1,15 @@
 import { isValidScale } from '../geometry/scale';
 import type { Vec2 } from '../geometry/vec';
-import type { DrawingDocument, Shape, ShapeStyle } from '../model/types';
+import type { ArrowheadStyle, DimAnchor, Dimension, DimensionStyle, DrawingDocument, Shape, ShapeStyle } from '../model/types';
 
 /**
  * Document storage format (*.a3d): UTF-8 JSON.
  * Pure functions – no file system access here (see fileService.ts).
  */
 export const FILE_FORMAT_ID = 'a3-precision-drawing';
-export const FILE_FORMAT_VERSION = 1;
+/** Version 2 (Milestone 2) adds `dimensions`. Version 1 files are still read. */
+export const FILE_FORMAT_VERSION = 2;
+export const SUPPORTED_FORMAT_VERSIONS: readonly number[] = [1, 2];
 export const FILE_EXTENSION = 'a3d';
 
 export class DocumentFormatError extends Error {
@@ -24,6 +26,7 @@ interface StoredFile {
   page: { widthMm: number; heightMm: number };
   scale: { paper: number; real: number };
   shapes: Shape[];
+  dimensions: Dimension[];
 }
 
 export function serializeDocument(doc: DrawingDocument): string {
@@ -34,6 +37,7 @@ export function serializeDocument(doc: DrawingDocument): string {
     page: { widthMm: doc.page.widthMm, heightMm: doc.page.heightMm },
     scale: { paper: doc.scale.paper, real: doc.scale.real },
     shapes: doc.shapes as Shape[],
+    dimensions: doc.dimensions as Dimension[],
   };
   return JSON.stringify(file, null, 2);
 }
@@ -89,6 +93,71 @@ function shape(v: unknown, index: number): Shape {
   }
 }
 
+const ARROWHEADS: readonly ArrowheadStyle[] = ['closed', 'open', 'tick', 'dot', 'none'];
+
+function dimStyle(v: unknown, where: string): DimensionStyle {
+  if (!isObj(v)) throw new DocumentFormatError(`${where}: missing style`);
+  if (typeof v.color !== 'string') throw new DocumentFormatError(`${where}: style.color must be a string`);
+  if (!ARROWHEADS.includes(v.arrowhead as ArrowheadStyle)) throw new DocumentFormatError(`${where}: unknown arrowhead`);
+  if (typeof v.showExtensionLines !== 'boolean') throw new DocumentFormatError(`${where}: showExtensionLines must be boolean`);
+  const decimals = num(v, 'decimals', where, { min: 0 });
+  if (!Number.isInteger(decimals) || decimals > 6) throw new DocumentFormatError(`${where}: decimals must be an integer 0–6`);
+  return {
+    color: v.color,
+    textHeightMm: num(v, 'textHeightMm', where, { min: 0 }),
+    decimals,
+    arrowSizeMm: num(v, 'arrowSizeMm', where, { min: 0 }),
+    arrowhead: v.arrowhead as ArrowheadStyle,
+    showExtensionLines: v.showExtensionLines,
+    extensionGapMm: num(v, 'extensionGapMm', where, { min: 0 }),
+    extensionOvershootMm: num(v, 'extensionOvershootMm', where, { min: 0 }),
+  };
+}
+
+function anchor(v: unknown, where: string): DimAnchor {
+  if (!isObj(v)) throw new DocumentFormatError(`${where}: expected an anchor`);
+  if (v.kind === 'point') return { kind: 'point', point: point(v.point, where) };
+  if (v.kind === 'shape' && typeof v.shapeId === 'string' && typeof v.key === 'string') return { kind: 'shape', shapeId: v.shapeId, key: v.key };
+  throw new DocumentFormatError(`${where}: invalid anchor`);
+}
+
+const str = (o: Obj, key: string, where: string): string => {
+  if (typeof o[key] !== 'string' || o[key] === '') throw new DocumentFormatError(`${where}: "${key}" must be a non-empty string`);
+  return o[key] as string;
+};
+const sign = (o: Obj, key: string, where: string): 1 | -1 => {
+  if (o[key] !== 1 && o[key] !== -1) throw new DocumentFormatError(`${where}: "${key}" must be 1 or -1`);
+  return o[key] as 1 | -1;
+};
+
+function dimension(v: unknown, index: number): Dimension {
+  const where = `dimensions[${index}]`;
+  if (!isObj(v)) throw new DocumentFormatError(`${where}: expected an object`);
+  if (v.mode !== 'driven') throw new DocumentFormatError(`${where}: unsupported dimension mode "${String(v.mode)}"`);
+  const base = { id: str(v, 'id', where), mode: 'driven' as const, style: dimStyle(v.style, where), textShift: num(v, 'textShift', where) };
+  switch (v.kind) {
+    case 'aligned':
+    case 'horizontal':
+    case 'vertical':
+      return { ...base, kind: v.kind, p1: anchor(v.p1, where), p2: anchor(v.p2, where), offset: num(v, 'offset', where) };
+    case 'radius':
+    case 'diameter':
+      return { ...base, kind: v.kind, circleId: str(v, 'circleId', where), angleDeg: num(v, 'angleDeg', where) };
+    case 'angular':
+      return {
+        ...base,
+        kind: 'angular',
+        line1Id: str(v, 'line1Id', where),
+        line2Id: str(v, 'line2Id', where),
+        sign1: sign(v, 'sign1', where),
+        sign2: sign(v, 'sign2', where),
+        radius: num(v, 'radius', where, { min: 0 }),
+      };
+    default:
+      throw new DocumentFormatError(`${where}: unknown dimension kind "${String(v.kind)}"`);
+  }
+}
+
 /** Parse and validate a stored document. Throws DocumentFormatError on any problem. */
 export function parseDocument(text: string): DrawingDocument {
   let raw: unknown;
@@ -98,7 +167,7 @@ export function parseDocument(text: string): DrawingDocument {
     throw new DocumentFormatError('File is not valid JSON');
   }
   if (!isObj(raw) || raw.format !== FILE_FORMAT_ID) throw new DocumentFormatError('Not an A3 Precision Drawing Studio file');
-  if (raw.formatVersion !== FILE_FORMAT_VERSION) {
+  if (!SUPPORTED_FORMAT_VERSIONS.includes(raw.formatVersion as number)) {
     throw new DocumentFormatError(`Unsupported file version ${String(raw.formatVersion)}`);
   }
   if (!isObj(raw.page)) throw new DocumentFormatError('Missing page');
@@ -108,10 +177,15 @@ export function parseDocument(text: string): DrawingDocument {
   if (!isValidScale(scale)) throw new DocumentFormatError('Invalid drawing scale');
   if (!Array.isArray(raw.shapes)) throw new DocumentFormatError('Missing shapes');
   const shapes = raw.shapes.map(shape);
+  let dimensions: Dimension[] = [];
+  if (raw.formatVersion !== 1) {
+    if (!Array.isArray(raw.dimensions)) throw new DocumentFormatError('Missing dimensions');
+    dimensions = raw.dimensions.map(dimension);
+  }
   const ids = new Set<string>();
-  for (const s of shapes) {
-    if (ids.has(s.id)) throw new DocumentFormatError(`Duplicate shape id "${s.id}"`);
+  for (const s of [...shapes, ...dimensions]) {
+    if (ids.has(s.id)) throw new DocumentFormatError(`Duplicate object id "${s.id}"`);
     ids.add(s.id);
   }
-  return { page, scale, shapes };
+  return { page, scale, shapes, dimensions };
 }

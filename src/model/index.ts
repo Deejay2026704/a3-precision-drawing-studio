@@ -5,3 +5,7 @@ export * from './hitTest';
 export * from './handles';
 export * from './document';
 export * from './ids';
+export * from './anchors';
+export * from './snap';
+export * from './dimensions';
+export * from './modify';

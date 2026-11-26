@@ -275,6 +275,7 @@ try {
 
   check('no renderer console errors', consoleErrors.length === 0, consoleErrors.join('\n'));
 } finally {
+  await app.evaluate(({ dialog }) => { dialog.showMessageBoxSync = () => 0; }).catch(() => {});
   await app.close();
   await server.close();
 }

@@ -1,7 +1,7 @@
 import { angleBetweenPoints, rotatePoint, rotateVec, snapAngle } from '../geometry/angles';
 import { boundsCenter, unionBounds, type Bounds } from '../geometry/bounds';
 import { add, midpoint, vec, type Vec2 } from '../geometry/vec';
-import { resizeBoundsByHandle, resizeRectByHandle, rotateShape, scaleShape, uniformScaleFactor, type BoxHandle } from './operations';
+import { moveShape, resizeBoundsByHandle, resizeRectByHandle, rotateShape, scaleShape, uniformScaleFactor, type BoxHandle } from './operations';
 import { rectCorners, shapeBounds, shapeCenter } from './shapes';
 import type { Shape } from './types';
 
@@ -9,7 +9,10 @@ import type { Shape } from './types';
  * Selection handles, computed in WORLD coordinates from the model.
  * The UI converts them to screen positions for drawing and hit testing.
  */
-export type HandleId = BoxHandle | 'start' | 'end' | 'rotate';
+export type HandleId = BoxHandle | 'start' | 'end' | 'rotate' | 'move';
+
+/** Grips move a point of the geometry exactly to the (snapped) cursor; the others resize/rotate. */
+export const isGrip = (id: HandleId): boolean => id === 'start' || id === 'end' || id === 'move';
 
 export interface Handle {
   readonly id: HandleId;
@@ -68,13 +71,19 @@ export function getSelectionFrame(shapes: readonly Shape[], rotateOffset: number
           handles: [
             { id: 'start', position: s.start },
             { id: 'end', position: s.end },
+            { id: 'move', position: mid },
             { id: 'rotate', position: add(mid, vec(0, rotateOffset)) },
           ],
         };
       }
       case 'rect': {
         const c = rectCorners(s);
-        return { mode: 'rect', outline: c, pivot: shapeCenter(s), handles: boxHandles(c, s.rotationDeg, rotateOffset) };
+        return {
+          mode: 'rect',
+          outline: c,
+          pivot: shapeCenter(s),
+          handles: [...boxHandles(c, s.rotationDeg, rotateOffset), { id: 'move', position: shapeCenter(s) }],
+        };
       }
       case 'circle': {
         const { center: c, radius: r } = s;
@@ -87,13 +96,21 @@ export function getSelectionFrame(shapes: readonly Shape[], rotateOffset: number
             { id: 'e', position: vec(c.x + r, c.y) },
             { id: 's', position: vec(c.x, c.y - r) },
             { id: 'w', position: vec(c.x - r, c.y) },
+            { id: 'move', position: c },
           ],
         };
       }
       case 'polyline': {
         const b = shapeBounds(s);
         const c = boxCorners(b);
-        return { mode: 'box', outline: c, pivot: boundsCenter(b), handles: boxHandles(c, 0, rotateOffset) };
+        const grips: Handle[] =
+          s.points.length > 1
+            ? [
+                { id: 'start', position: s.points[0] },
+                { id: 'end', position: s.points[s.points.length - 1] },
+              ]
+            : [];
+        return { mode: 'box', outline: c, pivot: boundsCenter(b), handles: [...boxHandles(c, 0, rotateOffset), ...grips] };
       }
     }
   }
@@ -130,6 +147,13 @@ export function applyHandleDrag(
   }
   const p = opts.snapPoint ? opts.snapPoint(current) : current;
 
+  if (handle === 'move') {
+    // Centre/midpoint grip: the grip lands exactly on the (snapped) cursor.
+    const grip = frame.handles.find((h) => h.id === 'move');
+    if (!grip) return [...originals];
+    return originals.map((s) => moveShape(s, p.x - grip.position.x, p.y - grip.position.y));
+  }
+
   if (frame.mode === 'multi') {
     const corner = handle as BoxHandle;
     const opp = frame.handles.find((h) => h.id === OPPOSITE[corner]);
@@ -156,6 +180,11 @@ export function applyHandleDrag(
     case 'circle':
       return [{ ...s, radius: Math.hypot(p.x - s.center.x, p.y - s.center.y) }];
     case 'polyline':
+      if (handle === 'start' || handle === 'end') {
+        const pts = [...s.points];
+        pts[handle === 'start' ? 0 : pts.length - 1] = p;
+        return [{ ...s, points: pts }];
+      }
       return [resizeBoundsByHandle(s, handle as BoxHandle, p)];
   }
 }

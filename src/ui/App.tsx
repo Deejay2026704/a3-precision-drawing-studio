@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { pageLengthToWorld } from '../geometry/scale';
 import { centredAtZoom, fitPage, zoomAt, type Viewport } from '../geometry/viewport';
 import { vec, type Vec2 } from '../geometry/vec';
-import { duplicateShapes, getShapes } from '../model/document';
+import { duplicateItems, getDimensions, getShapes, replaceDimensions, replaceShapes } from '../model/document';
+import { moveDimension } from '../model/dimensions';
 import { createIdGenerator } from '../model/ids';
 import { moveShape } from '../model/operations';
 import { DocumentFormatError, FILE_EXTENSION, parseDocument, serializeDocument } from '../storage/documentStorage';
@@ -17,13 +18,33 @@ import { createInitialState, editorReducer, isDirty, type ToolId } from './state
 export const APP_TITLE = 'A3 Precision Drawing Studio';
 const DUPLICATE_OFFSET_PAPER_MM = 10;
 
-const TOOL_KEYS: Record<string, ToolId> = { v: 'select', l: 'line', r: 'rect', c: 'circle', f: 'freehand' };
+/** Single-key tool shortcuts. Ignored while typing in any input, select or text field. */
+export const TOOL_KEYS: Record<string, ToolId> = {
+  v: 'select',
+  l: 'line',
+  r: 'rect',
+  c: 'circle',
+  f: 'freehand',
+  t: 'trim',
+  e: 'extend',
+  o: 'offset',
+  m: 'mirror',
+  d: 'dim-aligned',
+};
+
+/** True when keyboard input belongs to a text/numeric field rather than the drawing. */
+export const isTypingTarget = (t: EventTarget | null): boolean =>
+  t instanceof HTMLInputElement ||
+  t instanceof HTMLSelectElement ||
+  t instanceof HTMLTextAreaElement ||
+  (t instanceof HTMLElement && t.isContentEditable);
 
 export function App() {
   const [state, dispatch] = useReducer(editorReducer, undefined, createInitialState);
   const [tab, setTab] = useState<RibbonTab>('home');
   const [viewport, setViewport] = useState<Viewport>({ zoom: 1, originX: 0, originY: 0 });
   const [cursor, setCursor] = useState<Vec2 | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
   const canvasSize = useRef({ width: 0, height: 0 });
   const fitted = useRef(false);
   const newId = useMemo(() => createIdGenerator(), []);
@@ -75,10 +96,11 @@ export function App() {
       const s = stateRef.current;
       if (s.selection.length === 0) return;
       const off = pageLengthToWorld(DUPLICATE_OFFSET_PAPER_MM, s.doc.scale);
-      const { doc, newIds } = duplicateShapes(s.doc, s.selection, newId, vec(off, -off));
+      const { doc, newIds } = duplicateItems(s.doc, s.selection, newId, vec(off, -off));
       dispatch({
-        type: 'addShapes',
-        shapes: getShapes(doc, newIds),
+        type: 'commitDocument',
+        doc,
+        selection: newIds,
         message: `Duplicated ${newIds.length} object${newIds.length === 1 ? '' : 's'}`,
       });
     },
@@ -138,7 +160,7 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const { fileCommands: f, edit: ed } = handlersRef.current;
-      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement;
+      const typing = isTypingTarget(e.target);
       const ctrl = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
       if (ctrl && key === 's') {
@@ -161,18 +183,30 @@ export function App() {
         else dispatch({ type: 'setSelection', ids: [] });
         return;
       }
-      if (!ctrl && !e.altKey && TOOL_KEYS[key]) return dispatch({ type: 'setTool', tool: TOOL_KEYS[key] });
+      if (e.key === 'F3') {
+        e.preventDefault();
+        const on = !stateRef.current.view.objectSnap;
+        dispatch({ type: 'setView', view: { objectSnap: on } });
+        return dispatch({ type: 'setMessage', message: `Object snap ${on ? 'on' : 'off'}` });
+      }
+      if (e.key === 'F9') {
+        e.preventDefault();
+        const on = !stateRef.current.view.snapEnabled;
+        dispatch({ type: 'setView', view: { snapEnabled: on } });
+        return dispatch({ type: 'setMessage', message: `Grid snap ${on ? 'on' : 'off'}` });
+      }
+      if (!ctrl && !e.altKey && !e.shiftKey && TOOL_KEYS[key]) return dispatch({ type: 'setTool', tool: TOOL_KEYS[key] });
       const arrows: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
       if (arrows[e.key] && stateRef.current.selection.length > 0) {
         e.preventDefault();
         const step = e.shiftKey ? 10 : 1;
         const [dx, dy] = arrows[e.key];
         const s = stateRef.current;
-        dispatch({
-          type: 'updateShapes',
-          shapes: getShapes(s.doc, s.selection).map((sh) => moveShape(sh, dx * step, dy * step)),
-          message: `Nudged ${step} mm`,
-        });
+        const doc = replaceDimensions(
+          replaceShapes(s.doc, getShapes(s.doc, s.selection).map((sh) => moveShape(sh, dx * step, dy * step))),
+          getDimensions(s.doc, s.selection).map((dm) => moveDimension(dm, dx * step, dy * step)),
+        );
+        dispatch({ type: 'commitDocument', doc, message: `Nudged ${step} mm` });
       }
     };
     window.addEventListener('keydown', onKey);
@@ -192,7 +226,7 @@ export function App() {
       </header>
       <nav className="tabs">
         <FileMenu commands={fileCommands} />
-        {(['home', 'draw', 'view'] as const).map((t) => (
+        {(['home', 'draw', 'annotate', 'view'] as const).map((t) => (
           <button key={t} className={`tab${tab === t ? ' active' : ''}`} data-testid={`tab-${t}`} onClick={() => setTab(t)}>
             {t[0].toUpperCase() + t.slice(1)}
           </button>
@@ -208,11 +242,12 @@ export function App() {
           onResize={onResize}
           cursorWorld={cursor}
           onCursor={setCursor}
+          onFeedback={setFeedback}
           newId={newId}
         />
-        <PropertiesPanel state={state} dispatch={dispatch} />
+        <PropertiesPanel state={state} dispatch={dispatch} newId={newId} />
       </main>
-      <StatusBar state={state} cursor={cursor} zoom={viewport.zoom} view={view} />
+      <StatusBar state={state} dispatch={dispatch} cursor={cursor} feedback={feedback} zoom={viewport.zoom} view={view} />
     </div>
   );
 }

@@ -50,11 +50,106 @@ export interface PolylineShape extends ShapeBase {
 export type Shape = LineShape | RectShape | CircleShape | PolylineShape;
 export type ShapeKind = Shape['kind'];
 
+// ---------------------------------------------------------------------------
+// Dimensions (Milestone 2)
+// ---------------------------------------------------------------------------
+
+export type ArrowheadStyle = 'closed' | 'open' | 'tick' | 'dot' | 'none';
+
+/** Dimension appearance. Sizes are PAPER millimetres (like line weights), so text stays legible at any drawing scale. */
+export interface DimensionStyle {
+  readonly color: string;
+  readonly textHeightMm: number;
+  readonly decimals: number;
+  readonly arrowSizeMm: number;
+  readonly arrowhead: ArrowheadStyle;
+  readonly showExtensionLines: boolean;
+  /** Gap between the measured point and the start of the extension line. */
+  readonly extensionGapMm: number;
+  /** How far extension lines run past the dimension line. */
+  readonly extensionOvershootMm: number;
+}
+
+/**
+ * A definition point of a dimension. `shape` anchors are LINKED to a named point
+ * of a shape (see model/anchors.ts) and follow it when the geometry changes;
+ * `point` anchors are fixed drawing coordinates.
+ */
+export type DimAnchor =
+  | { readonly kind: 'shape'; readonly shapeId: ShapeId; readonly key: string }
+  | { readonly kind: 'point'; readonly point: Vec2 };
+
+/**
+ * 'driven': the value is MEASURED from geometry and can never be typed in.
+ * (A future 'constraint' mode — a user-entered value that drives geometry — is
+ * deliberately a different mode so the two can never be confused.)
+ */
+export type DimensionMode = 'driven';
+
+interface DimensionBase {
+  readonly id: ShapeId;
+  readonly mode: DimensionMode;
+  readonly style: DimensionStyle;
+  /** Text displacement along the dimension line / arc (drawing mm). */
+  readonly textShift: number;
+}
+
+export interface LinearDimension extends DimensionBase {
+  readonly kind: 'aligned' | 'horizontal' | 'vertical';
+  readonly p1: DimAnchor;
+  readonly p2: DimAnchor;
+  /** Signed distance (drawing mm) of the dimension line from p1, measured along the dimension's normal. */
+  readonly offset: number;
+}
+
+export interface RadialDimension extends DimensionBase {
+  readonly kind: 'radius' | 'diameter';
+  readonly circleId: ShapeId;
+  /** Direction of the dimension line from the centre, degrees CCW. */
+  readonly angleDeg: number;
+}
+
+export interface AngularDimension extends DimensionBase {
+  readonly kind: 'angular';
+  readonly line1Id: ShapeId;
+  readonly line2Id: ShapeId;
+  /** Which ray of each line bounds the measured angle (+1 = towards the line's end point). */
+  readonly sign1: 1 | -1;
+  readonly sign2: 1 | -1;
+  /** Arc radius from the vertex (drawing mm). */
+  readonly radius: number;
+}
+
+export type Dimension = LinearDimension | RadialDimension | AngularDimension;
+export type DimensionKind = Dimension['kind'];
+
+export const DIMENSION_KIND_LABELS: Record<DimensionKind, string> = {
+  aligned: 'Aligned dimension',
+  horizontal: 'Horizontal dimension',
+  vertical: 'Vertical dimension',
+  angular: 'Angular dimension',
+  radius: 'Radius dimension',
+  diameter: 'Diameter dimension',
+};
+
+export const DEFAULT_DIMENSION_STYLE: DimensionStyle = Object.freeze({
+  color: '#0b6e75',
+  textHeightMm: 2.5,
+  decimals: 2,
+  arrowSizeMm: 2.5,
+  arrowhead: 'closed',
+  showExtensionLines: true,
+  extensionGapMm: 1,
+  extensionOvershootMm: 1.5,
+});
+
 export interface DrawingDocument {
   readonly page: PageSize;
   readonly scale: DrawingScale;
   /** Painting order: later shapes are drawn on top. */
   readonly shapes: readonly Shape[];
+  /** Annotation layer, drawn above shapes. */
+  readonly dimensions: readonly Dimension[];
 }
 
 export const DEFAULT_STYLE: ShapeStyle = Object.freeze({ stroke: '#000000', strokeWidthMm: 0.35 });

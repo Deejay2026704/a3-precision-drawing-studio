@@ -17,6 +17,16 @@ const PATHS: Record<string, string> = {
   grid: 'M3 3h18v18H3zM9 3v18M15 3v18M3 9h18M3 15h18',
   snap: 'M12 3v4M12 17v4M3 12h4M17 12h4M12 9a3 3 0 1 0 0.001 0z',
   file: 'M6 3h8l4 4v14H6zM14 3v4h4',
+  trim: 'M3 12h7M14 12h7M12 4v16M8 9l-3 3 3 3',
+  extend: 'M3 12h12M18 4v16M12 9l3 3-3 3',
+  offset: 'M4 16L16 4M8 20L20 8',
+  mirror: 'M12 3v18M9 7L4 17h5zM15 7l5 10h-5z',
+  dimAligned: 'M4 18L18 4M3 14l4 4M14 3l4 4M6 21L21 6',
+  dimHorizontal: 'M4 6v12M20 6v12M4 12h16M7 9l-3 3 3 3M17 9l3 3-3 3',
+  dimVertical: 'M6 4h12M6 20h12M12 4v16M9 7l3-3 3 3M9 17l3 3 3-3',
+  dimAngular: 'M4 20h16M4 20L16 6M12 20a8 8 0 0 0-2.3-5.6',
+  dimRadius: 'M12 3a9 9 0 1 0 0.001 0zM12 12l6-6M15 6h3v3',
+  dimDiameter: 'M12 3a9 9 0 1 0 0.001 0zM6 18L18 6M15 6h3v3M6 15v3h3',
 };
 
 export function Icon({ name, size = 20 }: { name: keyof typeof PATHS | string; size?: number }) {

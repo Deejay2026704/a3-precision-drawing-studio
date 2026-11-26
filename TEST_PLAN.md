@@ -1,4 +1,4 @@
-# Test Plan: Milestone 1
+# Test Plan: Milestones 1 and 2
 
 There are three levels of testing:
 
@@ -25,6 +25,22 @@ Last result: **11 files, 77 tests, all passing.**
 | Storage | `tests/storage.test.ts` | Exact round trip; header and units; malformed JSON, wrong format, negative radius, duplicate ids and bad scale all rejected |
 | Editor state / undo | `tests/editorReducer.test.ts` | Add selects and marks dirty; a whole drag = one undo step; cancel drag restores; delete and undo; scale change undoable without touching shapes; save clears dirty |
 | Rulers | `tests/rulerTicks.test.ts` | 1-2-5 step selection; major ticks on multiples |
+
+### Milestone 2 unit tests (added)
+
+Last full result: **19 files, 176 tests, all passing** (77 M1 + 99 M2).
+
+| Area | File | What is verified |
+| --- | --- | --- |
+| Intersections | `tests/intersect.test.ts` | crossing / **parallel / collinear** / non-intersecting / **zero-length** segments; line–circle secant, tangent, miss; circle–circle two points, tangent, separate, concentric; perpendicular feet; tangent points are truly tangent; mirror reflection |
+| Snap calculations | `tests/snap.test.ts` | each of the 7 object snaps gives the exact point; endpoint snap returns a link anchor; parallel / non-intersecting give no intersection; perpendicular/tangent need a base point; priority tiers; individual toggles; excluded shapes; zero-length geometry; grid fallback; **bit-exact snap at 5 zoom/scale combinations and no capture outside the aperture** |
+| Grid | `tests/grid.test.ts` | configured spacing; automatic coarsening; grid snap rounding |
+| Dimension values | `tests/dimensions.test.ts` | aligned / horizontal / vertical / radius / diameter / angular (both sides, lines meeting when extended); refusals (parallel, same line, coincident points, non-circle); formatting/precision/symbols; **associativity after move, length change, rotation, radius change, rectangle resize**; missing geometry → no value; dependent delete; duplicate re-links; layout geometry; paper-sized text at 1:50; extension lines toggle; grips; hit testing |
+| Trim / extend / offset / mirror | `tests/modify.test.ts` | trim end, start, middle (split, linked dimension follows), against circles; **refusals for non-crossing / parallel / unsupported / zero-length**; extend both ends, nearest boundary incl. circles, refusals; offset of lines (both sides), circles (in/out/too large), rotated rectangles (in/out/too large), mitred polylines, invalid distances/sides; exact mirror of all shapes incl. rotated rectangles; copy vs replace; zero-length axis; empty selection |
+| Grips | `tests/grips.test.ts` | every shape has endpoint/centre grips; centre grip snaps exactly; move grips; polyline end grips; **identical grip result at 4 zoom levels** |
+| Undo / redo | `tests/undoRedo.test.ts` | one undo step + exact undo/redo for trim (end, split), extend, offset, mirror (copy, replace), add dimension, dimension grip/style; delete with dependents; long mixed sequence fully undone and redone; refused op leaves history untouched |
+| Tool workflows | `tests/toolSession.test.ts` | click sequences with real snapping for every M2 tool; linked vs fixed anchors; wrong picks refused; previews never modify the document |
+| Storage | `tests/storage.test.ts` | version 2 round trip of all dimension kinds; **version 1 files still open**; malformed dimensions rejected |
 
 ## 2. End-to-end smoke test: `npm run e2e`
 
@@ -84,6 +100,34 @@ Checks performed:
   * New clears the drawing; Open restores 4 objects.
   * No renderer console errors.
 
+### Milestone 2 end-to-end suite: `tests-e2e/milestone2.mjs`
+
+Last result: **62 checks passed, 0 failed** — 3 consecutive runs, together with the
+unchanged Milestone 1 suite (64/64) each time. Screenshots `docs/screenshots/m2-*.png`.
+
+* **Numeric creation:** line (start, length, angle incl. 30°), circle by diameter, rectangle; radius 0 refused.
+* **Snapping (grid snap off, so results can only come from object snaps):** centre, endpoint,
+  midpoint, perpendicular, tangent markers appear and give **exact** coordinates
+  (e.g. 250.25, 120.75); live L/∠ feedback while drawing; click-click drawing; turning
+  the Centre snap off stops centre snapping; **snap still exact after zooming > 400 %**.
+* **Tool switching:** a click immediately after a tool shortcut is handled by the new tool.
+* **Dimensions:** aligned dimension linked to line endpoints; reads 120.00 → 135.50 after
+  editing the line, unchanged after nudging; select by clicking its text; "Driven" badge;
+  read-only value; precision 3 → 135.500; text height 5 mm renders at 5 paper-mm;
+  numeric offset; arrowhead + extension-line settings; R25.00, ⌀50.00, 30.00°; same line
+  twice refused with a message.
+* **Modify:** trim preview shown; trim exact to the crossing (x = 80); undo/redo; empty pick
+  refused without changing history; extend exactly to a rectangle edge (x = 300); offset
+  exactly 15 mm; Shift+click selection inside Mirror; mirrored circle at (149.75, 120.75).
+* **Grips:** centre grip snaps a circle exactly onto a line endpoint; its radius dimension
+  follows; undo.
+* **Delete:** deleting a circle removes its 2 dimensions with a message; undo restores all.
+* **Keyboard/UI:** letters, Delete, Ctrl+Z typed in a field don't affect tools/drawing; `T`
+  activates Trim outside fields; status bar + ribbon show the active tool; tooltips; F3.
+* **Files:** saved as version 2 with all dimensions; reopened with identical counts and
+  the linked dimension still measuring the edited line.
+* No renderer console errors.
+
 ### Additional one-off checks performed
 
 * `npm run dev` starts Vite and Electron and the window stays up.
@@ -109,3 +153,7 @@ Run `npm install` and then `npm run dev`, and check each item:
 - [ ] Change scale to 1:50 and back: object values are unchanged and the on-paper hint updates
 - [ ] Save, close the app, reopen, and Open the file: identical drawing
 - [ ] Close with unsaved changes: a prompt appears
+- [ ] (M2) Hover near ends/midpoints/centres/crossings: the orange snap marker names the snap; F3/F9 toggle
+- [ ] (M2) Draw a line by clicking two points; draw one "by numbers"
+- [ ] (M2) Dimension a line, then change the line length: the dimension updates
+- [ ] (M2) Trim, extend, offset and mirror; Ctrl+Z / Ctrl+Y after each

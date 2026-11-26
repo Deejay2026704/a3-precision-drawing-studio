@@ -1,5 +1,65 @@
 # Development Status
 
+## Milestone 2 — Precision drafting tools: **complete** (26 Nov 2026)
+
+All Milestone 1 features, UI layout, coordinate system (origin bottom-left, +X right,
++Y up, real-world mm) and file format were preserved; the format was extended
+additively to version 2 and still opens version 1 files.
+
+| Requirement | Status | Where / notes |
+| --- | --- | --- |
+| Object snaps: endpoint, midpoint, centre, intersection, perpendicular, tangent, nearest | Done | `model/snap.ts`. Individually toggleable (Draw ▸ Snap), master toggle F3 / OSNAP. Nearest is off by default |
+| Grid snap + configurable grid spacing (mm) | Done | Grid snap increment (F9 / GRID) and visible grid spacing (View ▸ Show) are separate settings, both in drawing mm |
+| Snap indicator at the cursor | Done | Glyph per snap type + label (`render/SnapMarker.tsx`) |
+| Snapping from geometry, not pixels; correct for zoom and scale | Done | Snap points are computed exactly from geometry; only the 10 px aperture is converted to drawing mm through zoom **and** scale. Tested bit-exact at 5 zoom/scale combinations and in the real app at > 400 % |
+| Aligned, horizontal, vertical, angular, radius, diameter dimensions | Done | Annotate tab |
+| Editable, linked to geometry, accurate after edits | Done | Linked anchors; values recomputed every render. Tested after move, length change, rotate, resize, trim-split, save/reopen |
+| Precision and text height configurable | Done | Ribbon (defaults for new) and Properties (selected) |
+| Text placement, extension lines, arrowheads, offset adjustable | Done | Properties + drag/grips |
+| Driven vs future constraints clearly distinguished | Done | `mode: 'driven'` in the model and file; "Driven · measured from geometry" badge; value read-only |
+| Trim, extend, offset, mirror | Done | `model/modify.ts`. Trim/extend: lines (any object is a boundary). Offset: lines, circles, rectangles, polylines. Mirror: all shapes |
+| Endpoint and centre grips | Done | Line ends + midpoint, polyline ends, rectangle/circle centre. Grips snap |
+| Numeric entry: line length/angle, rectangle W/H, circle radius/diameter | Done | Editing (M1) **and** new "by numbers" creation in Properties |
+| Undo/redo for every operation | Done | Every operation is one atomic `commitDocument` / edit transaction |
+| Invalid/ambiguous operations handled safely | Done | Refusals return a reason; document untouched (tests). Deleting geometry removes linked dimensions *with a message* |
+| Live coordinate/length/angle feedback | Done | Cursor tooltip + status bar (snapped X/Y and live readout) |
+| Shortcuts don't interfere with text fields | Done | Tested: letters, Delete, Ctrl+Z typed in a field don't affect the drawing |
+| Tooltips and active-tool indicators | Done | Descriptive tooltips on all new tools; active tool highlighted on ribbon and in status bar; prompts for each step |
+
+### Defects found and fixed during Milestone 2 verification
+
+1. **Tool-switch race** (real bug): the click tools' state was created in a React effect,
+   so a click made immediately after switching tools (e.g. `D` then click) could be
+   handled by the previous tool. The session is now derived synchronously from the
+   active tool, and pending click-click drawings are tagged with the tool that started
+   them. Regression check in the M2 E2E suite.
+2. **Select-tool priority**: dimensions always won the hit test, so clicking a circle where
+   its radius-dimension arrow touches it selected the dimension. The closest item now wins,
+   geometry on ties.
+3. Test-harness: closing the app with unsaved changes opened the (correct) native prompt and
+   blocked the run; the harness now answers it.
+
+### Known limitations (Milestone 2)
+
+* **Trim and extend work on lines only.** Rectangles, circles and polylines act as cutting
+  edges/boundaries but cannot themselves be trimmed: trimming a circle needs an arc
+  entity, which does not exist yet. The tools refuse with an explanation.
+* Trimming a line that **nothing crosses** is refused (it does not delete the line).
+* Splitting a line by trimming its middle: dimensions linked to the line's end follow the
+  new far piece; a dimension linked to the line's *midpoint* stays on the first piece.
+* **Angular dimensions** measure between two *lines* only (not rectangle edges or
+  polyline segments) and have no text-flip/outside-arrow logic for very small angles.
+* Dimensions are not copied by **Mirror** (they are copied by Duplicate when their
+  geometry is copied too). Dimension text is not user-overridable (by design: driven).
+* Very short dimensions place arrows inside the extension lines even when they overlap.
+* Snap candidates are searched among all shapes each pointer move — fine for hundreds of
+  objects; a spatial index will be needed for very large drawings.
+* Still **not verified on Windows hardware** and no installer (unchanged from M1).
+
+---
+
+## Milestone 1 (complete, 26 Nov 2026)
+
 **Milestone 1: complete.** Verified on 26 Nov 2026. The verification is described
 in `TEST_PLAN.md`. Advanced CAD features have not been started.
 
@@ -62,8 +122,8 @@ None of these block the milestone. All of them are candidates for later mileston
 * **Two pivots for rectangle rotation.** The Rotation field turns a rectangle about its
   base corner (X, Y) so the entered X and Y stay fixed. The rotate handle turns about
   the centre. This is deliberate and documented in the panel, but users may need to learn it.
-* **Snapping is to an increment only** (default 1 mm). There is no snapping to object
-  points such as endpoints, midpoints or centres yet. Freehand input is never snapped.
+* ~~Snapping is to an increment only~~ — **resolved in Milestone 2** (object snaps).
+  Freehand input is still never snapped (by design).
 * **Pen colour list is fixed.** A file containing a colour outside the six listed shows
   the first entry in the colour drop-down. The stored colour is kept.
 * **No printing or export** (PDF, SVG or DXF) yet.
@@ -74,6 +134,14 @@ None of these block the milestone. All of them are candidates for later mileston
 
 ## Suggested next milestone (not started)
 
+*(Superseded – see the Milestone 3 recommendation in the final report / below.)*
+
 Windows packaging (electron-builder NSIS), snapping to object points, a coordinate
 command line (e.g. `@100<30`), dimensions, layers, print or PDF export at true scale,
 and filled shapes with inside hit-testing.
+
+## Recommended Milestone 3
+
+Arcs (needed for trimming circles and fillets), fillet/chamfer, layers with line types,
+print / PDF export at true scale, a coordinate command line (`@100<30`), and Windows
+packaging (electron-builder NSIS) with a first run on real Windows hardware.

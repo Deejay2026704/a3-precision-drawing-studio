@@ -4,10 +4,11 @@ import { unionBounds, type Bounds } from '../geometry/bounds';
 import type { Vec2 } from '../geometry/vec';
 import { duplicateShape } from './operations';
 import { shapeBounds } from './shapes';
-import type { DrawingDocument, Shape, ShapeId } from './types';
+import { copyDimensions, dimensionShapeIds } from './dimensions';
+import type { Dimension, DrawingDocument, Shape, ShapeId } from './types';
 
 export function createEmptyDocument(): DrawingDocument {
-  return { page: A3_LANDSCAPE, scale: SCALE_1_1, shapes: [] };
+  return { page: A3_LANDSCAPE, scale: SCALE_1_1, shapes: [], dimensions: [] };
 }
 
 export const findShape = (doc: DrawingDocument, id: ShapeId): Shape | undefined => doc.shapes.find((s) => s.id === id);
@@ -56,4 +57,83 @@ export function setDocumentScale(doc: DrawingDocument, scale: DrawingScale): Dra
 export function selectionBounds(doc: DrawingDocument, ids: readonly ShapeId[]): Bounds | null {
   const shapes = getShapes(doc, ids);
   return shapes.length ? unionBounds(shapes.map(shapeBounds)) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Milestone 2: dimensions and mixed selections
+// ---------------------------------------------------------------------------
+
+export function getDimensions(doc: DrawingDocument, ids: readonly ShapeId[]): Dimension[] {
+  const set = new Set(ids);
+  return doc.dimensions.filter((d) => set.has(d.id));
+}
+
+export const allItemIds = (doc: DrawingDocument): ShapeId[] => [...doc.shapes.map((s) => s.id), ...doc.dimensions.map((d) => d.id)];
+
+export function addDimensions(doc: DrawingDocument, dims: readonly Dimension[]): DrawingDocument {
+  return { ...doc, dimensions: [...doc.dimensions, ...dims] };
+}
+
+export function replaceDimensions(doc: DrawingDocument, updated: readonly Dimension[]): DrawingDocument {
+  if (updated.length === 0) return doc;
+  const map = new Map(updated.map((d) => [d.id, d]));
+  return { ...doc, dimensions: doc.dimensions.map((d) => map.get(d.id) ?? d) };
+}
+
+export interface RemoveResult {
+  doc: DrawingDocument;
+  removedShapes: number;
+  removedDimensions: number;
+  /** Dimensions removed only because geometry they were linked to was deleted. */
+  dependentDimensions: number;
+}
+
+/**
+ * Delete shapes and/or dimensions by id. Dimensions linked to a deleted shape are
+ * deleted too (they would have nothing to measure) and are counted separately so
+ * the UI can say so – nothing is removed silently.
+ */
+export function removeItems(doc: DrawingDocument, ids: readonly ShapeId[]): RemoveResult {
+  const set = new Set(ids);
+  const shapes = doc.shapes.filter((s) => !set.has(s.id));
+  const removedShapeIds = new Set(doc.shapes.filter((s) => set.has(s.id)).map((s) => s.id));
+  let dependent = 0;
+  let direct = 0;
+  const dimensions = doc.dimensions.filter((d) => {
+    if (set.has(d.id)) {
+      direct++;
+      return false;
+    }
+    if (dimensionShapeIds(d).some((id) => removedShapeIds.has(id))) {
+      dependent++;
+      return false;
+    }
+    return true;
+  });
+  return {
+    doc: { ...doc, shapes, dimensions },
+    removedShapes: removedShapeIds.size,
+    removedDimensions: direct + dependent,
+    dependentDimensions: dependent,
+  };
+}
+
+/** Duplicate shapes and dimensions in the selection; copied dimensions link to the copied shapes. */
+export function duplicateItems(
+  doc: DrawingDocument,
+  ids: readonly ShapeId[],
+  newId: () => ShapeId,
+  offset: Vec2,
+): { doc: DrawingDocument; newIds: ShapeId[] } {
+  const idMap = new Map<ShapeId, ShapeId>();
+  const shapeCopies = getShapes(doc, ids).map((s) => {
+    const copy = duplicateShape(s, newId(), offset);
+    idMap.set(s.id, copy.id);
+    return copy;
+  });
+  const dimCopies = copyDimensions(getDimensions(doc, ids), idMap, newId, offset);
+  return {
+    doc: addDimensions(addShapes(doc, shapeCopies), dimCopies),
+    newIds: [...shapeCopies.map((s) => s.id), ...dimCopies.map((d) => d.id)],
+  };
 }

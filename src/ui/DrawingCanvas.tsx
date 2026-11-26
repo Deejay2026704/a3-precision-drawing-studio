@@ -5,28 +5,47 @@ import { screenLengthToWorld, screenToWorld, worldToScreen, type ViewTransform }
 import { formatNumber, snapValue } from '../geometry/units';
 import { panBy, zoomAt, type Viewport } from '../geometry/viewport';
 import { distance, sub, vec, type Vec2 } from '../geometry/vec';
-import { getShapes } from '../model/document';
+import { getDimensions, getShapes, replaceDimensions, replaceShapes } from '../model/document';
+import {
+  applyDimensionGrip,
+  distanceToDimensionLayout,
+  hitTestDimensions,
+  layoutDimension,
+  moveDimension,
+  type DimGripId,
+} from '../model/dimensions';
 import { applyHandleDrag, getSelectionFrame, type HandleId, type SelectionFrame } from '../model/handles';
-import { hitTest, shapesInsideBounds } from '../model/hitTest';
+import { distanceToShape, hitTest, shapesInsideBounds } from '../model/hitTest';
 import { moveShape } from '../model/operations';
-import { createCircle, createLine, createPolyline, createRectFromCorners, lineLength } from '../model/shapes';
-import type { Shape, ShapeId } from '../model/types';
+import { createCircle, createLine, createPolyline, createRectFromCorners, lineAngle, lineLength } from '../model/shapes';
+import { findSnap, type SnapResult, type SnapSettings } from '../model/snap';
+import type { Dimension, Shape, ShapeId } from '../model/types';
+import { DimensionLayoutView, DimensionView } from '../render/DimensionView';
 import { PageView } from '../render/PageView';
 import { HorizontalRuler, RULER_SIZE, VerticalRuler } from '../render/Rulers';
-import { HANDLE_SIZE_PX, ROTATE_HANDLE_OFFSET_PX, SelectionOverlay } from '../render/SelectionOverlay';
+import { DimensionGrips, HANDLE_SIZE_PX, ROTATE_HANDLE_OFFSET_PX, SelectionOverlay } from '../render/SelectionOverlay';
+import { CursorFeedback, SnapMarker } from '../render/SnapMarker';
 import { ShapeView } from '../render/ShapeView';
-import type { EditorAction, EditorState } from './state/editorReducer';
+import { newSession, sessionInProgress, toolClick, toolPreview, type SessionTool, type ToolInput, type ToolSession } from './interaction/toolSession';
+import { snapSettingsOf, TOOL_PROMPTS, type EditorAction, type EditorState, type ToolId } from './state/editorReducer';
 
 const HIT_TOLERANCE_PX = 6;
+/** Snap aperture: object snaps capture within this many screen pixels (converted to drawing mm). */
+export const SNAP_APERTURE_PX = 10;
 const DRAG_THRESHOLD_PX = 3;
 const FREEHAND_MIN_STEP_PX = 2;
 
+const DRAW_TOOLS: readonly ToolId[] = ['line', 'rect', 'circle', 'freehand'];
+const isSessionTool = (t: ToolId): t is SessionTool => !DRAW_TOOLS.includes(t) && t !== 'select';
+
 type Drag =
   | { kind: 'pan'; startScreen: Vec2; startViewport: Viewport }
-  | { kind: 'move'; startScreen: Vec2; startWorld: Vec2; originals: Shape[]; active: boolean }
-  | { kind: 'handle'; handle: HandleId; frame: SelectionFrame; startWorld: Vec2; originals: Shape[] }
+  | { kind: 'move'; startScreen: Vec2; startWorld: Vec2; base: Vec2; originals: Shape[]; dims: Dimension[]; active: boolean }
+  | { kind: 'handle'; handle: HandleId; frame: SelectionFrame; startWorld: Vec2; originals: Shape[]; base: Vec2 | null }
+  | { kind: 'dimgrip'; grip: DimGripId; original: Dimension }
   | { kind: 'marquee'; startScreen: Vec2; additive: boolean }
-  | { kind: 'draw'; startWorld: Vec2; points: Vec2[]; lastScreen: Vec2 };
+  /** clickMode: started with a click (no drag) – the next click sets the second point. */
+  | { kind: 'draw'; tool: ToolId; startWorld: Vec2; startScreen: Vec2; points: Vec2[]; lastScreen: Vec2; clickMode: boolean };
 
 interface Props {
   state: EditorState;
@@ -36,14 +55,31 @@ interface Props {
   onResize: (width: number, height: number) => void;
   cursorWorld: Vec2 | null;
   onCursor: (p: Vec2 | null) => void;
+  onFeedback: (text: string | null) => void;
   newId: () => ShapeId;
 }
 
+const fmt = (v: number) => formatNumber(v, 3);
+
+/** Live readout for a shape being drawn or edited. */
+function describeShape(s: Shape): string {
+  switch (s.kind) {
+    case 'line':
+      return `L ${fmt(lineLength(s))} mm  ∠ ${formatNumber(lineAngle(s), 2)}°`;
+    case 'rect':
+      return `${fmt(s.width)} × ${fmt(s.height)} mm`;
+    case 'circle':
+      return `R ${fmt(s.radius)}  ⌀ ${fmt(2 * s.radius)} mm`;
+    case 'polyline':
+      return `${s.points.length} points`;
+  }
+}
+
 /**
- * Workspace: rulers + SVG canvas. Converts pointer input from screen px to world mm
- * exactly once, then edits the model through pure model operations.
+ * Workspace: rulers + SVG canvas. Pointer input is converted from screen px to drawing mm
+ * exactly once, snapped against drawing geometry, then turned into model operations.
  */
-export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize, cursorWorld, onCursor, newId }: Props) {
+export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize, cursorWorld, onCursor, onFeedback, newId }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<Drag | null>(null);
@@ -53,14 +89,37 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
   const [marquee, setMarquee] = useState<{ a: Vec2; b: Vec2 } | null>(null);
   const [hoverCursor, setHoverCursor] = useState<string>('default');
   const [panning, setPanning] = useState(false);
+  const [snapShown, setSnapShown] = useState<SnapResult | null>(null);
+  const [feedback, setFeedbackState] = useState<string | null>(null);
+  const [hover, setHover] = useState<{ raw: Vec2; point: Vec2; snap: SnapResult | null; screen: Vec2 } | null>(null);
+  const [sessionState, setSession] = useState<ToolSession | null>(null);
+  const sessionRef = useRef<ToolSession | null>(null);
 
   const { doc, selection, tool, view } = state;
+  // Derived synchronously from the CURRENT tool, so a click made immediately after a tool
+  // change can never be handled by the previous tool (no wait for an effect to run).
+  const session: ToolSession | null = isSessionTool(tool)
+    ? sessionState && sessionState.tool === tool
+      ? sessionState
+      : newSession(tool)
+    : null;
+  sessionRef.current = session;
   const transform: ViewTransform = useMemo(() => ({ scale: doc.scale, viewport }), [doc.scale, viewport]);
   const selectedShapes = useMemo(() => getShapes(doc, selection), [doc, selection]);
+  const selectedDims = useMemo(() => getDimensions(doc, selection), [doc, selection]);
   const frame = useMemo(
     () => getSelectionFrame(selectedShapes, screenLengthToWorld(ROTATE_HANDLE_OFFSET_PX, transform)),
     [selectedShapes, transform],
   );
+  const singleDim = selectedShapes.length === 0 && selectedDims.length === 1 ? selectedDims[0] : null;
+  const singleDimLayout = singleDim ? layoutDimension(doc, singleDim, doc.scale) : null;
+  const snapSettings: SnapSettings = useMemo(() => snapSettingsOf(view), [view]);
+  const aperture = screenLengthToWorld(SNAP_APERTURE_PX, transform);
+
+  const setFeedback = (t: string | null) => {
+    setFeedbackState(t);
+    onFeedback(t);
+  };
 
   // ---- size tracking ----
   useLayoutEffect(() => {
@@ -90,20 +149,35 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
     return () => el.removeEventListener('wheel', onWheel);
   }, [setViewport]);
 
-  // ---- Space (pan) and Escape (cancel drag) ----
+  // ---- Space (pan) and Escape (cancel the current step before the app handles Esc) ----
   useEffect(() => {
-    const isTyping = (e: KeyboardEvent) => e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement;
+    const isTyping = (e: KeyboardEvent) =>
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLSelectElement ||
+      e.target instanceof HTMLTextAreaElement ||
+      (e.target instanceof HTMLElement && e.target.isContentEditable);
     const down = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !isTyping(e)) {
+      if (isTyping(e)) return;
+      if (e.code === 'Space') {
         spaceDown.current = true;
         e.preventDefault();
       }
-      if (e.key === 'Escape' && dragRef.current) {
-        const d = dragRef.current;
-        if (d.kind === 'move' || d.kind === 'handle') dispatch({ type: 'cancelEdit' });
+      if (e.key !== 'Escape') return;
+      const d = dragRef.current;
+      if (d) {
+        if (d.kind === 'move' || d.kind === 'handle' || d.kind === 'dimgrip') dispatch({ type: 'cancelEdit' });
         dragRef.current = null;
         setDraft(null);
         setMarquee(null);
+        setFeedback(null);
+        e.stopPropagation();
+        return;
+      }
+      const s = sessionRef.current;
+      if (sessionInProgress(s)) {
+        setSession(newSession(s!.tool));
+        dispatch({ type: 'setMessage', message: TOOL_PROMPTS[s!.tool] });
+        setFeedback(null);
         e.stopPropagation();
       }
     };
@@ -116,25 +190,61 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
       window.removeEventListener('keydown', down, true);
       window.removeEventListener('keyup', up);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch]);
 
-  // Leaving a draw tool discards any unfinished draft.
-  useEffect(() => setDraft(null), [tool]);
+  // Changing tool discards unfinished input.
+  useEffect(() => {
+    setDraft(null);
+    setSnapShown(null);
+    setFeedback(null);
+    if (dragRef.current?.kind === 'draw') dragRef.current = null;
+    setSession(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool]);
 
   const localPoint = (e: { clientX: number; clientY: number }): Vec2 => {
     const r = svgRef.current!.getBoundingClientRect();
     return vec(e.clientX - r.left, e.clientY - r.top);
   };
-  const snap = (p: Vec2): Vec2 =>
-    view.snapEnabled ? vec(snapValue(p.x, view.snapStepMm), snapValue(p.y, view.snapStepMm)) : p;
+
+  const snapAt = (raw: Vec2, opts: { base?: Vec2 | null; exclude?: ReadonlySet<ShapeId> } = {}): SnapResult | null =>
+    findSnap(raw, snapSettings, { shapes: doc.shapes, tolerance: aperture, basePoint: opts.base ?? null, excludeIds: opts.exclude });
 
   const findHandle = (sp: Vec2): HandleId | null => {
     if (!frame || tool !== 'select') return null;
-    for (const h of frame.handles) {
+    // Grips are checked first so a centre grip wins over an overlapping resize handle.
+    const ordered = [...frame.handles].sort((a, b) => Number(b.id === 'move') - Number(a.id === 'move'));
+    for (const h of ordered) {
       const hp = worldToScreen(h.position, transform);
       if (Math.abs(hp.x - sp.x) <= HANDLE_SIZE_PX / 2 + 3 && Math.abs(hp.y - sp.y) <= HANDLE_SIZE_PX / 2 + 3) return h.id;
     }
     return null;
+  };
+
+  const findDimGrip = (sp: Vec2): DimGripId | null => {
+    if (!singleDimLayout || tool !== 'select') return null;
+    for (const g of singleDimLayout.grips) {
+      const p = worldToScreen(g.position, transform);
+      if (Math.abs(p.x - sp.x) <= HANDLE_SIZE_PX / 2 + 3 && Math.abs(p.y - sp.y) <= HANDLE_SIZE_PX / 2 + 3) return g.id;
+    }
+    return null;
+  };
+
+  /**
+   * Item under the cursor in the Select tool: the closest of the topmost shape and the
+   * topmost dimension. Geometry wins ties (a dimension's arrow tip often sits exactly on it);
+   * dimensions are still easy to pick by their text or dimension line.
+   */
+  const pickAt = (wp: Vec2): { hit: Shape | Dimension | null; hitDim: Dimension | null } => {
+    const tol = screenLengthToWorld(HIT_TOLERANCE_PX, transform);
+    const shape = hitTest(doc.shapes, wp, tol);
+    const dim = hitTestDimensions(doc, wp, tol);
+    if (!dim) return { hit: shape, hitDim: null };
+    if (!shape) return { hit: dim, hitDim: dim };
+    const lay = layoutDimension(doc, dim, doc.scale);
+    const dDim = lay ? distanceToDimensionLayout(lay, wp) : Infinity;
+    return distanceToShape(shape, wp) <= dDim ? { hit: shape, hitDim: null } : { hit: dim, hitDim: dim };
   };
 
   const buildDraft = (d: Extract<Drag, { kind: 'draw' }>, current: Vec2, constrain: boolean): Shape | null => {
@@ -142,12 +252,12 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
     const a = d.startWorld;
     switch (tool) {
       case 'line': {
-        let b = snap(current);
+        let b = current;
         if (constrain) b = polarPoint(a, distance(a, b), snapAngle(angleBetweenPoints(a, b), 15));
         return createLine('draft', a, b, style);
       }
       case 'rect': {
-        let b = snap(current);
+        let b = current;
         if (constrain) {
           const side = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y));
           b = vec(a.x + Math.sign(b.x - a.x || 1) * side, a.y + Math.sign(b.y - a.y || 1) * side);
@@ -155,12 +265,47 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
         return createRectFromCorners('draft', a, b, style);
       }
       case 'circle':
-        return createCircle('draft', a, distance(a, snap(current)), style);
+        return createCircle('draft', a, distance(a, current), style);
       case 'freehand':
         return createPolyline('draft', d.points, style);
       default:
         return null;
     }
+  };
+
+  const finishDraw = (d: Extract<Drag, { kind: 'draw' }>, current: Vec2, constrain: boolean) => {
+    dragRef.current = null;
+    const shape = buildDraft(d, current, constrain);
+    setDraft(null);
+    setFeedback(null);
+    if (!shape || !isMeaningful(shape)) {
+      dispatch({ type: 'setMessage', message: 'Nothing created: the object would have zero size' });
+      return;
+    }
+    const created = { ...shape, id: newId() };
+    dispatch({ type: 'addShapes', shapes: [created], message: describeCreated(created) });
+  };
+
+  const toolInput = (raw: Vec2, snap: SnapResult | null): ToolInput => ({
+    doc,
+    selection,
+    raw,
+    point: snap?.point ?? raw,
+    snap,
+    tolerance: screenLengthToWorld(HIT_TOLERANCE_PX, transform),
+    dimStyle: state.dimStyle,
+    offsetDistanceMm: state.offsetDistanceMm,
+    mirrorKeepSource: state.mirrorKeepSource,
+    newId,
+  });
+
+  /** Base point for perpendicular / tangent snaps in the current context. */
+  const contextBase = (): Vec2 | null => {
+    const d = dragRef.current;
+    if (d?.kind === 'draw' && tool === 'line') return d.startWorld;
+    if (d?.kind === 'handle') return d.base;
+    if (session && session.points.length > 0) return session.points[session.points.length - 1];
+    return null;
   };
 
   // ---------------- pointer handlers ----------------
@@ -180,14 +325,33 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
     if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
 
+    // Second click of a click-click drawing.
+    const pending = dragRef.current;
+    if (pending?.kind === 'draw' && pending.tool !== tool) {
+      dragRef.current = null; // started with another tool: discard
+      setDraft(null);
+    } else if (pending?.kind === 'draw' && pending.clickMode) {
+      const p = tool === 'freehand' ? wp : (snapAt(wp, { base: tool === 'line' ? pending.startWorld : null })?.point ?? wp);
+      finishDraw(pending, p, e.shiftKey);
+      return;
+    }
+
     if (tool === 'select') {
       const handle = findHandle(sp);
       if (handle && frame) {
         dispatch({ type: 'beginEdit' });
-        dragRef.current = { kind: 'handle', handle, frame, startWorld: wp, originals: selectedShapes };
+        const s0 = selectedShapes[0];
+        const base = selectedShapes.length === 1 && s0.kind === 'line' ? (handle === 'start' ? s0.end : handle === 'end' ? s0.start : null) : null;
+        dragRef.current = { kind: 'handle', handle, frame, startWorld: wp, originals: selectedShapes, base };
         return;
       }
-      const hit = hitTest(doc.shapes, wp, screenLengthToWorld(HIT_TOLERANCE_PX, transform));
+      const dg = findDimGrip(sp);
+      if (dg && singleDim) {
+        dispatch({ type: 'beginEdit' });
+        dragRef.current = { kind: 'dimgrip', grip: dg, original: singleDim };
+        return;
+      }
+      const { hit, hitDim } = pickAt(wp);
       if (hit) {
         if (e.shiftKey || e.ctrlKey || e.metaKey) {
           dispatch({ type: 'toggleSelection', id: hit.id });
@@ -196,7 +360,26 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
         const ids = selection.includes(hit.id) ? selection : [hit.id];
         if (!selection.includes(hit.id)) dispatch({ type: 'setSelection', ids });
         dispatch({ type: 'beginEdit' });
-        dragRef.current = { kind: 'move', startScreen: sp, startWorld: wp, originals: getShapes(doc, ids), active: false };
+        const shapes = getShapes(doc, ids);
+        if (hitDim && shapes.length === 0 && ids.length === 1) {
+          // Dragging a lone dimension moves its dimension line / leader / arc (placement only).
+          const grip: DimGripId = hitDim.kind === 'radius' || hitDim.kind === 'diameter' ? 'leader' : hitDim.kind === 'angular' ? 'arc' : 'dimline';
+          dragRef.current = { kind: 'dimgrip', grip, original: hitDim };
+          return;
+        }
+        // Base point: if the grab is near an endpoint/midpoint/centre of the moved geometry, use it exactly.
+        const baseSnap = snapSettings.objectSnap
+          ? findSnap(wp, { ...snapSettings, gridSnap: false, kinds: { ...snapSettings.kinds, intersection: false, perpendicular: false, tangent: false, nearest: false } }, { shapes, tolerance: aperture })
+          : null;
+        dragRef.current = {
+          kind: 'move',
+          startScreen: sp,
+          startWorld: wp,
+          base: baseSnap?.point ?? wp,
+          originals: shapes,
+          dims: getDimensions(doc, ids),
+          active: false,
+        };
         return;
       }
       const additive = e.shiftKey || e.ctrlKey || e.metaKey;
@@ -206,9 +389,31 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
       return;
     }
 
+    if (session) {
+      if (session.tool === 'mirror' && (e.shiftKey || e.ctrlKey)) {
+        const s = hitTest(doc.shapes, wp, screenLengthToWorld(HIT_TOLERANCE_PX, transform));
+        if (s) dispatch({ type: 'toggleSelection', id: s.id });
+        return;
+      }
+      const snap = snapAt(wp, { base: contextBase() });
+      const step = toolClick(session, toolInput(wp, snap));
+      setSession(step.session);
+      if (step.kind === 'continue') {
+        if (step.selection) dispatch({ type: 'setSelection', ids: step.selection });
+        dispatch({ type: 'setMessage', message: step.prompt });
+      } else if (step.kind === 'commit') {
+        dispatch({ type: 'commitDocument', doc: step.doc, selection: step.selection, message: step.message });
+        setFeedback(null);
+      } else {
+        dispatch({ type: 'setMessage', message: `⚠ ${step.message}` });
+      }
+      return;
+    }
+
     // Drawing tools
-    const start = tool === 'freehand' ? wp : snap(wp);
-    const d: Drag = { kind: 'draw', startWorld: start, points: [start], lastScreen: sp };
+    if (!DRAW_TOOLS.includes(tool)) return;
+    const start = tool === 'freehand' ? wp : (snapAt(wp)?.point ?? wp);
+    const d: Drag = { kind: 'draw', tool, startWorld: start, startScreen: sp, points: [start], lastScreen: sp, clickMode: false };
     dragRef.current = d;
     setDraft(buildDraft(d, start, e.shiftKey));
   };
@@ -216,14 +421,24 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
     const sp = localPoint(e);
     const wp = screenToWorld(sp, transform);
-    onCursor(tool === 'freehand' ? wp : snap(wp));
     const d = dragRef.current;
+    const drawing = d?.kind === 'draw' && tool !== 'freehand';
+    const editing = d?.kind === 'move' || d?.kind === 'handle';
+    const exclude = editing ? new Set(selection) : undefined;
+    const wantSnap = drawing || editing || (session !== null) || (!d && DRAW_TOOLS.includes(tool) && tool !== 'freehand');
+    const snap = wantSnap ? snapAt(wp, { base: contextBase(), exclude }) : null;
+    const point = snap?.point ?? wp;
+    setSnapShown(snap);
+    setHover({ raw: wp, point, snap, screen: sp });
+    onCursor(point);
 
     if (!d) {
       if (tool === 'select') {
-        const h = findHandle(sp);
-        const overShape = !h && hitTest(doc.shapes, wp, screenLengthToWorld(HIT_TOLERANCE_PX, transform));
-        setHoverCursor(h === 'rotate' ? 'grab' : h ? 'crosshair' : overShape ? 'move' : 'default');
+        const h = findHandle(sp) ?? findDimGrip(sp);
+        const over = !h && pickAt(wp).hit;
+        setHoverCursor(h === 'rotate' ? 'grab' : h ? 'crosshair' : over ? 'move' : 'default');
+      } else if (session) {
+        setFeedback(toolPreview(session, toolInput(wp, snap)).feedback);
       }
       return;
     }
@@ -235,50 +450,85 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
       case 'move': {
         if (!d.active && distance(sp, d.startScreen) < DRAG_THRESHOLD_PX) return;
         d.active = true;
-        let delta = sub(wp, d.startWorld);
-        if (view.snapEnabled) delta = vec(snapValue(delta.x, view.snapStepMm), snapValue(delta.y, view.snapStepMm));
+        let delta: Vec2;
+        if (snap && snap.kind !== 'grid') {
+          delta = sub(snap.point, d.base); // object snap: base point lands exactly on the snap
+        } else {
+          delta = sub(wp, d.startWorld);
+          if (view.snapEnabled) delta = vec(snapValue(delta.x, view.snapStepMm), snapValue(delta.y, view.snapStepMm));
+        }
         if (e.shiftKey) delta = Math.abs(delta.x) >= Math.abs(delta.y) ? vec(delta.x, 0) : vec(0, delta.y);
-        dispatch({ type: 'previewShapes', shapes: d.originals.map((s) => moveShape(s, delta.x, delta.y)) });
+        const next = replaceDimensions(
+          replaceShapes(doc, d.originals.map((s) => moveShape(s, delta.x, delta.y))),
+          d.dims.map((dm) => moveDimension(dm, delta.x, delta.y)),
+        );
+        dispatch({ type: 'previewDocument', doc: next });
+        setFeedback(`Δ ${fmt(delta.x)}, ${fmt(delta.y)} mm`);
         break;
       }
-      case 'handle':
-        dispatch({
-          type: 'previewShapes',
-          shapes: applyHandleDrag(d.originals, d.frame, d.handle, d.startWorld, wp, {
-            constrain: e.shiftKey,
-            snapPoint: view.snapEnabled ? snap : undefined,
-          }),
+      case 'handle': {
+        const shapes = applyHandleDrag(d.originals, d.frame, d.handle, d.startWorld, wp, {
+          constrain: e.shiftKey,
+          snapPoint: () => point,
         });
+        dispatch({ type: 'previewShapes', shapes });
+        if (d.handle === 'rotate') {
+          const a = angleBetweenPoints(d.frame.pivot, wp) - angleBetweenPoints(d.frame.pivot, d.startWorld);
+          setFeedback(`∠ ${formatNumber(e.shiftKey ? snapAngle(a, 15) : a, 2)}°`);
+        } else if (shapes.length === 1) setFeedback(describeShape(shapes[0]));
         break;
+      }
+      case 'dimgrip': {
+        const updated = applyDimensionGrip(doc, d.original, d.grip, wp);
+        dispatch({ type: 'previewDocument', doc: replaceDimensions(doc, [updated]) });
+        const lay = layoutDimension(doc, updated, doc.scale);
+        setFeedback(lay ? `${lay.text} (driven)` : null);
+        break;
+      }
       case 'marquee':
         setMarquee({ a: d.startScreen, b: sp });
         break;
-      case 'draw':
-        if (tool === 'freehand' && distance(sp, d.lastScreen) >= FREEHAND_MIN_STEP_PX) {
-          d.points = [...d.points, wp];
-          d.lastScreen = sp;
+      case 'draw': {
+        if (tool === 'freehand') {
+          if (distance(sp, d.lastScreen) >= FREEHAND_MIN_STEP_PX) {
+            d.points = [...d.points, wp];
+            d.lastScreen = sp;
+          }
         }
-        setDraft(buildDraft(d, wp, e.shiftKey));
+        const s = buildDraft(d, tool === 'freehand' ? wp : point, e.shiftKey);
+        setDraft(s);
+        if (s) setFeedback(describeShape(s));
         break;
+      }
     }
   };
 
   const onPointerUp = (e: ReactPointerEvent<SVGSVGElement>) => {
     const d = dragRef.current;
-    dragRef.current = null;
     if (!d) return;
     const sp = localPoint(e);
     switch (d.kind) {
       case 'pan':
+        dragRef.current = null;
         setPanning(false);
         break;
       case 'move':
-        dispatch({ type: 'endEdit', message: `Moved ${d.originals.length} object${d.originals.length === 1 ? '' : 's'}` });
+        dragRef.current = null;
+        dispatch({ type: 'endEdit', message: `Moved ${d.originals.length + d.dims.length} object${d.originals.length + d.dims.length === 1 ? '' : 's'}` });
+        setFeedback(null);
         break;
       case 'handle':
-        dispatch({ type: 'endEdit', message: d.handle === 'rotate' ? 'Rotated selection' : 'Resized selection' });
+        dragRef.current = null;
+        dispatch({ type: 'endEdit', message: d.handle === 'rotate' ? 'Rotated selection' : d.handle === 'move' || d.handle === 'start' || d.handle === 'end' ? 'Grip edit' : 'Resized selection' });
+        setFeedback(null);
+        break;
+      case 'dimgrip':
+        dragRef.current = null;
+        dispatch({ type: 'endEdit', message: 'Dimension placement changed' });
+        setFeedback(null);
         break;
       case 'marquee': {
+        dragRef.current = null;
         setMarquee(null);
         if (distance(sp, d.startScreen) < DRAG_THRESHOLD_PX) break;
         const win = boundsFromCorners(screenToWorld(d.startScreen, transform), screenToWorld(sp, transform));
@@ -287,11 +537,15 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
         break;
       }
       case 'draw': {
-        const shape = buildDraft(d, screenToWorld(sp, transform), e.shiftKey);
-        setDraft(null);
-        if (!shape || !isMeaningful(shape)) break;
-        const created = { ...shape, id: newId() };
-        dispatch({ type: 'addShapes', shapes: [created], message: describeCreated(created) });
+        if (d.clickMode) break; // waiting for the second click
+        if (tool !== 'freehand' && distance(sp, d.startScreen) < DRAG_THRESHOLD_PX) {
+          // A click rather than a drag: switch to click-click drawing.
+          d.clickMode = true;
+          dispatch({ type: 'setMessage', message: `${tool === 'circle' ? 'Circle' : tool === 'rect' ? 'Rectangle' : 'Line'}: click the ${tool === 'circle' ? 'radius point' : 'second point'}, or type exact values in Properties (Esc cancels)` });
+          break;
+        }
+        const wp = screenToWorld(sp, transform);
+        finishDraw(d, tool === 'freehand' ? wp : (hover?.point ?? wp), e.shiftKey);
         break;
       }
     }
@@ -299,6 +553,7 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
 
   // ---------------- rendering ----------------
 
+  const preview = session && hover ? toolPreview(session, toolInput(hover.raw, hover.snap)) : null;
   const cursorScreen = cursorWorld ? worldToScreen(cursorWorld, transform) : null;
   const cursor = panning ? 'grabbing' : tool === 'select' ? hoverCursor : 'crosshair';
   const selectedSet = new Set(selection);
@@ -313,23 +568,52 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
           ref={svgRef}
           className="canvas"
           data-testid="canvas"
+          data-tool={tool}
           width={size.width}
           height={size.height}
           style={{ cursor }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          onPointerLeave={() => !dragRef.current && onCursor(null)}
+          onPointerLeave={() => {
+            if (!dragRef.current) {
+              onCursor(null);
+              setSnapShown(null);
+              setHover(null);
+            }
+          }}
           onContextMenu={(e) => e.preventDefault()}
         >
-          <PageView page={doc.page} transform={transform} showGrid={view.showGrid} />
+          <PageView page={doc.page} transform={transform} showGrid={view.showGrid} gridSpacingMm={view.gridSpacingMm} />
           <g data-testid="shapes">
             {doc.shapes.map((s) => (
               <ShapeView key={s.id} shape={s} transform={transform} stroke={selectedSet.has(s.id) && tool !== 'select' ? '#1a73e8' : undefined} />
             ))}
           </g>
+          <g data-testid="dimensions">
+            {doc.dimensions.map((dm) => (
+              <DimensionView key={dm.id} dim={dm} doc={doc} transform={transform} highlight={selectedSet.has(dm.id) ? '#1a73e8' : undefined} />
+            ))}
+          </g>
           {draft && <ShapeView shape={draft} transform={transform} stroke="#1a73e8" />}
+          {preview && (
+            <g data-testid="tool-preview" pointerEvents="none">
+              {preview.shapes.map((s) => (
+                <ShapeView key={s.id} shape={s} transform={transform} stroke="#1a73e8" dashed />
+              ))}
+              {preview.dimensions.map((dm) => {
+                const lay = layoutDimension(doc, dm, doc.scale);
+                return lay ? <DimensionLayoutView key={dm.id} layout={lay} arrowhead={dm.style.arrowhead} transform={transform} color="#1a73e8" /> : null;
+              })}
+              {preview.removed.map(([a, b], i) => {
+                const p = worldToScreen(a, transform);
+                const q = worldToScreen(b, transform);
+                return <line key={i} x1={p.x} y1={p.y} x2={q.x} y2={q.y} className="trim-preview" data-testid="trim-preview" />;
+              })}
+            </g>
+          )}
           {frame && <SelectionOverlay frame={frame} transform={transform} interactive={tool === 'select'} />}
+          {singleDimLayout && tool === 'select' && <DimensionGrips grips={singleDimLayout.grips} transform={transform} />}
           {marquee && (
             <rect
               className="marquee"
@@ -339,6 +623,8 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
               height={Math.abs(marquee.b.y - marquee.a.y)}
             />
           )}
+          {snapShown && <SnapMarker snap={snapShown} transform={transform} />}
+          {feedback && hover && <CursorFeedback text={feedback} x={hover.screen.x} y={hover.screen.y} />}
         </svg>
       </div>
     </div>
@@ -358,7 +644,7 @@ function isMeaningful(s: Shape): boolean {
   }
 }
 
-function describeCreated(s: Shape): string {
+export function describeCreated(s: Shape): string {
   switch (s.kind) {
     case 'line':
       return `Line created – length ${formatNumber(lineLength(s))} mm`;

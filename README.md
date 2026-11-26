@@ -3,8 +3,10 @@
 A Windows desktop application for precise 2D drawing and editing on an A3 sheet.
 It is a precision drawing tool (CAD-style), **not** a publishing application.
 
-Current state: **Milestone 1** (application shell, A3 page, basic drawing objects,
-object editing, exact numeric input, drawing scale). See `DEVELOPMENT_STATUS.md`.
+Current state: **Milestone 2** — precision drafting tools (object snaps, grid snap,
+associative dimensions, trim/extend/offset/mirror, grips, numeric creation) on top of
+Milestone 1 (shell, A3 page, drawing objects, editing, numeric input, drawing scale).
+See `DEVELOPMENT_STATUS.md`.
 
 ---
 
@@ -20,7 +22,7 @@ npm test           # run the automated geometry/model/storage tests (Vitest)
 npm run typecheck  # TypeScript type check
 npm run build      # production build of renderer (dist/) and main process (dist-electron/)
 npm start          # launch the production build
-npm run e2e        # end-to-end test that drives the real Electron window (needs `playwright`)
+npm run e2e        # both end-to-end suites (M1 + M2) driving the real Electron window (needs `playwright`)
 ```
 
 Screenshots taken from the real app during verification are in `docs/screenshots/`.
@@ -49,6 +51,16 @@ On Linux when running as root (e.g. in a container) Electron needs
 | Fit page / 100 % | View ▸ Fit Page, View ▸ 100 % (100 % = true paper size at 96 dpi) |
 | Drawing scale | Home ▸ Drawing Scale (1:1 … 1:100, or Custom…, e.g. `1:25`, `2:1`) |
 | Files | File ▸ New / Open / Save / Save As (`*.a3d`, JSON) |
+| Click-click drawing | click once for the first point, move, click again (drag still works). Esc cancels |
+| Draw by numbers | with Line / Rectangle / Circle active, type values in Properties ▸ "by numbers" and press **Create** |
+| Object snaps | Draw ▸ Snap: Endpoint, Midpoint, Centre, Intersection, Perpendicular, Tangent, Nearest (each toggleable). `F3` or **OSNAP** in the status bar toggles all |
+| Grid snap / grid | `F9` or **GRID** in the status bar; increment on Draw ▸ Snap ▸ Step. Grid spacing on View ▸ Show |
+| Trim / Extend | `T` / `E`, then click the part of a line to remove / near the end to extend |
+| Offset | `O`, set the distance on Draw ▸ Modify, click an object, then the side |
+| Mirror | `M`; with objects selected (or Shift+click them in the tool) click two points on the mirror line. "Mirror keeps source" = copy |
+| Grips | select an object: filled squares are grips — line ends, polyline ends, centre/midpoint (move). Grips snap |
+| Dimensions | Annotate tab: Aligned (`D`), Horizontal, Vertical (3 clicks: point, point, placement), Angular (line, line, placement), Radius / Diameter (click a circle) |
+| Edit a dimension | click its text/line: Properties shows the measured value (read-only, *driven*), precision, text height, arrowheads, extension lines, offset, text shift. Drag it or its grips to reposition |
 
 ---
 
@@ -110,6 +122,24 @@ Conversions (`src/geometry/scale.ts`, `src/geometry/viewport.ts`, `src/geometry/
 Changing the drawing scale changes only the world→page factor. Shape geometry is
 never modified by a scale change (covered by tests).
 
+### Milestone 2 modules
+
+| Module | Responsibility |
+| --- | --- |
+| `geometry/intersect.ts` | line/segment/circle intersections, perpendicular feet, tangent points, nearest points, reflection; parallel / tangent / degenerate cases handled explicitly |
+| `model/anchors.ts` | named points on shapes (`start`, `end`, `mid`, `c0..c3`, `m0..m3`, `center`, `v<i>`, `sm<i>`) and decomposition into primitives |
+| `model/snap.ts` | `findSnap()`: exact candidate points from geometry; only the pick radius comes from the screen (10 px → drawing mm via zoom **and** drawing scale) |
+| `model/dimensions.ts` | driven, associative dimensions: measure, layout, hit-test, grips, creation, copy/retarget |
+| `model/modify.ts` | trim, extend, offset, mirror — each returns a complete new document or a refusal with a reason |
+| `ui/interaction/toolSession.ts` | click-driven tool state machine (pure, unit-tested); the canvas only feeds it snapped clicks |
+
+**Driven vs constraint dimensions.** Every dimension has `mode: 'driven'`: its value is
+*measured* from the geometry it is linked to and cannot be typed. A future user-entered
+constraint that drives geometry would be a different `mode`, rendered and labelled
+differently. Dimension definition points are links (`{shapeId, key}`), so values update
+when geometry is moved, resized, trimmed or edited. Deleting geometry deletes the
+dimensions linked to it in the same undo step, and the status bar reports how many.
+
 ### Drawing objects (all in world mm)
 
 | Kind | Stored geometry |
@@ -128,21 +158,24 @@ Each object also has a style: stroke colour and line weight in **paper** mm
 electron/            main.ts (window, dialogs, IPC), preload.ts (contextBridge API)
 scripts/             dev.mjs (Vite + Electron dev runner), build-electron.mjs, electron-build.mjs
 src/
-  geometry/          vec, angles, bounds, page (A3), scale, viewport, coords
-  model/             types, shapes, operations, handles, hitTest, document
+  geometry/          vec, angles, bounds, page (A3), scale, viewport, coords, intersect
+  model/             types, shapes, operations, handles, hitTest, document,
+                     anchors, snap, dimensions, modify
   storage/           documentStorage (serialise/validate), fileService (IPC adapter)
   render/            ShapeView, PageView, GridView, Rulers, SelectionOverlay, rulerTicks
   ui/                App, FileMenu, Ribbon, PropertiesPanel, DrawingCanvas, StatusBar, controls
   ui/state/          editorReducer (store + undo/redo)
+  ui/interaction/    toolSession (click-driven modify/dimension tools)
   main.tsx           renderer entry
 tests/               Vitest unit tests (no UI, no DOM)
-tests-e2e/           Playwright script that drives the real Electron window
+tests-e2e/           Playwright scripts that drive the real Electron window (M1, M2)
 docs/screenshots/    screenshots captured by the end-to-end run
 ```
 
 ### File format
 
-`*.a3d` — UTF-8 JSON: `{ format: "a3-precision-drawing", formatVersion: 1, page, scale, shapes }`.
+`*.a3d` — UTF-8 JSON: `{ format: "a3-precision-drawing", formatVersion: 2, units: "mm", page, scale, shapes, dimensions }`.
+Version 2 (Milestone 2) only *adds* `dimensions`; Milestone 1 (version 1) files still open.
 Loading validates every field and rejects malformed files with a clear message.
 
 ### Technical risks identified (and mitigations)
