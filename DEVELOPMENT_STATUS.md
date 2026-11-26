@@ -45,7 +45,11 @@ pages) or fitted (NOT TO SCALE).
 * End-to-end (local, real Electron): M1 64, M2 62, M3 78, M4 31, M5 53, **M6 32** – all
   passing; packaged Linux build 18/18. Hatch/fill/text output also checked visually from a
   PDF rendered with poppler.
-* CI: __CI_RESULT__
+* CI run [45784398087](https://github.com/Deejay2026704/a3-precision-drawing-studio/actions/runs/45784398087)
+  (commit `d1cac32`), all jobs green: Linux 355 unit tests (3 poppler tests skipped – not on
+  the runner) and E2E 64 + 62 + 78 + 30 + 47 + 30 (poppler checks skipped); **Windows**
+  installed-app smoke 18/18 and auto-update 9/9; **macOS** installed-app smoke 18/18 and
+  update check 7/7.
 
 ### Defects found and fixed during Milestone 6
 1. A newly placed text's input box lost keyboard focus to the click that placed it, so
