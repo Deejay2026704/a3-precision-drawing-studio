@@ -10,6 +10,7 @@
 // Checks: launch from the package (file://, CSP), drawing, PDF export at A3 true size,
 // autosave to the separate recovery folder, CRASH + recovery, save/reopen, clean quit.
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -67,6 +68,31 @@ async function launch() {
   return { app, win, errors, setPaths };
 }
 
+/** After a forced kill, wait until every process of the app is gone (Windows keeps helper
+ *  processes alive for a few seconds; relaunching earlier hits the single-instance lock). */
+async function waitForAllProcessesToExit() {
+  if (process.platform !== 'win32') return sleep(2500);
+  const image = path.basename(exe);
+  for (let i = 0; i < 60; i++) {
+    const out = execFileSync('tasklist', ['/FI', `IMAGENAME eq ${image}`, '/NH'], { encoding: 'utf8' });
+    if (!out.includes(image)) return;
+    await sleep(500);
+  }
+  console.log('  note: app processes still running after 30 s');
+}
+
+/** Launch, retrying once if the new process closes immediately. */
+async function relaunch() {
+  try {
+    return await launch();
+  } catch (e) {
+    console.log(`  note: first relaunch failed (${String(e).split('\n')[0]}), retrying`);
+    await waitForAllProcessesToExit();
+    await sleep(2000);
+    return launch();
+  }
+}
+
 const listAutosaves = () => (existsSync(autosaveDir) ? readdirSync(autosaveDir).filter((f) => f.endsWith('.json')) : []);
 let current = null;
 
@@ -110,11 +136,11 @@ try {
 
   // ------------------------------------------------------------------ crash
   app.process().kill('SIGKILL');
-  await sleep(2500);
+  await waitForAllProcessesToExit();
   check('after a crash the recovery copy is still there', listAutosaves().length === 1);
 
   // ------------------------------------------------------------------ restart → recover
-  current = await launch();
+  current = await relaunch();
   ({ app, win, errors, setPaths } = current);
   await win.waitForSelector('[data-testid=dialog-recovery]', { timeout: 15000 });
   check('on restart the app offers to recover the unsaved drawing', true);
