@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 
 /** Text entry that commits on Enter / leaving the field; Escape reverts. */
 export function TextField({ label, value, maxLength, onCommit, testId, title }: { label: string; value: string; maxLength: number; onCommit: (v: string) => void; testId?: string; title?: string }) {
@@ -47,10 +47,21 @@ export function TextAreaField({ label, value, maxLength, onCommit, testId, autoF
   const [text, setText] = useState(value);
   const [focused, setFocused] = useState(false);
   const skipBlur = useRef(false);
+  const ref = useRef<HTMLTextAreaElement>(null);
   const commit = (v: string) => {
     const t = v.slice(0, maxLength);
     if (t !== value) onCommit(t);
   };
+  // Focus AFTER the click that created the text has finished: the browser moves focus to
+  // the page on mouse-down, which would immediately take it away again.
+  useEffect(() => {
+    if (!autoFocus) return;
+    const t = window.setTimeout(() => {
+      ref.current?.focus();
+      ref.current?.select();
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [autoFocus]);
   return (
     <label className="field text-area-field">
       <span className="field-label">{label}</span>
@@ -59,13 +70,12 @@ export function TextAreaField({ label, value, maxLength, onCommit, testId, autoF
         data-testid={testId}
         rows={Math.min(8, Math.max(2, (focused ? text : value).split('\n').length))}
         value={focused ? text : value}
+        ref={ref}
         maxLength={maxLength}
-        autoFocus={autoFocus}
         onChange={(e) => setText(e.target.value)}
-        onFocus={(e) => {
+        onFocus={() => {
           setText(value);
           setFocused(true);
-          if (autoFocus) e.currentTarget.select();
         }}
         onBlur={() => {
           if (skipBlur.current) skipBlur.current = false;
