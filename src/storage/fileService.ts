@@ -1,4 +1,4 @@
-import type { OpenFileResult } from '../types/a3studio';
+import type { AutosaveApi, AutosaveEntry, OpenFileResult } from '../types/a3studio';
 import { FILE_EXTENSION } from './documentStorage';
 
 /**
@@ -12,6 +12,7 @@ export interface FileService {
   save(path: string, content: string): Promise<string>;
   saveAs(content: string, suggestedName: string): Promise<string | null>;
   exportSvg(content: string, suggestedName: string): Promise<string | null>;
+  exportPdf(bytes: Uint8Array, suggestedName: string): Promise<string | null>;
   readonly canSaveInPlace: boolean;
 }
 
@@ -43,11 +44,15 @@ function browserFileService(): FileService {
       download(name, content, 'image/svg+xml');
       return name;
     },
+    exportPdf: async (bytes, name) => {
+      download(name, bytes, 'application/pdf');
+      return name;
+    },
   };
 }
 
-function download(name: string, content: string, type = 'application/json'): void {
-  const url = URL.createObjectURL(new Blob([content], { type }));
+function download(name: string, content: string | Uint8Array, type = 'application/json'): void {
+  const url = URL.createObjectURL(new Blob([content as BlobPart], { type }));
   const a = document.createElement('a');
   a.href = url;
   a.download = baseName(name);
@@ -64,5 +69,28 @@ export function getFileService(): FileService {
     save: (path, content) => api.saveDrawing(path, content),
     saveAs: (content, name) => api.saveDrawingAs(content, name),
     exportSvg: (content, name) => api.exportSvg(content, name),
+    exportPdf: (bytes, name) => api.exportPdf(bytes, name),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Autosave service (Electron: separate recovery folder in the app's data directory;
+// browser fallback: localStorage). Never touches the user's project files.
+// ---------------------------------------------------------------------------
+
+function browserAutosave(): AutosaveApi {
+  const PREFIX = 'a3-autosave:';
+  const own = `${PREFIX}session-${Date.now()}`;
+  return {
+    write: async (content) => localStorage.setItem(own, content),
+    clear: async () => localStorage.removeItem(own),
+    orphans: async (): Promise<AutosaveEntry[]> =>
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith(PREFIX) && k !== own)
+        .map((k) => ({ id: k.slice(PREFIX.length), pid: 0, modifiedMs: 0, sizeBytes: localStorage.getItem(k)!.length })),
+    read: async (id) => localStorage.getItem(PREFIX + id) ?? '',
+    remove: async (id) => localStorage.removeItem(PREFIX + id),
+  };
+}
+
+export const getAutosaveService = (): AutosaveApi => window.a3Studio?.autosave ?? browserAutosave();

@@ -7,12 +7,12 @@ import path from 'node:path';
  * untouched and the temporary file is removed – a failed save can never leave a
  * half-written project behind.
  */
-export async function writeFileAtomic(filePath: string, content: string): Promise<void> {
+export async function writeFileAtomic(filePath: string, content: string | Uint8Array): Promise<void> {
   const tmp = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
   try {
     const handle = await fs.open(tmp, 'w');
     try {
-      await handle.writeFile(content, 'utf8');
+      await (typeof content === 'string' ? handle.writeFile(content, 'utf8') : handle.writeFile(content));
       await handle.sync();
     } finally {
       await handle.close();

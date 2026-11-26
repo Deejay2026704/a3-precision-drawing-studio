@@ -106,6 +106,8 @@ export interface EditorState {
   readonly sourceVersion: number | null;
   /** Layer that receives new objects. */
   readonly activeLayerId: LayerId;
+  /** Opened from an autosave recovery copy: unsaved until the user saves it. */
+  readonly recovered: boolean;
   readonly fileName: string;
   readonly drawStyle: ShapeStyle;
   readonly view: ViewSettings;
@@ -133,6 +135,7 @@ export function createInitialState(): EditorState {
     filePath: null,
     sourceVersion: null,
     activeLayerId: DEFAULT_LAYER_ID,
+    recovered: false,
     fileName: 'Untitled.a3d',
     drawStyle: { ...DEFAULT_STYLE, stroke: BY_LAYER },
     view: {
@@ -176,7 +179,17 @@ export type EditorAction =
   | { type: 'undo' }
   | { type: 'redo' }
   | { type: 'newDocument' }
-  | { type: 'loadDocument'; doc: DrawingDocument; path: string | null; name: string; settings?: ProjectSettings; sourceVersion?: number; message?: string }
+  | {
+      type: 'loadDocument';
+      doc: DrawingDocument;
+      path: string | null;
+      name: string;
+      settings?: ProjectSettings;
+      sourceVersion?: number;
+      message?: string;
+      /** Recovered from autosave: open as MODIFIED (not saved). */
+      recovered?: boolean;
+    }
   | { type: 'setActiveLayer'; id: LayerId }
   | { type: 'markSaved'; path: string | null; name: string }
   | { type: 'setMessage'; message: string };
@@ -424,8 +437,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         view,
         activeLayerId: set && action.doc.layers.some((l) => l.id === set.activeLayerId) ? set.activeLayerId : action.doc.layers[0].id,
         sourceVersion: action.sourceVersion ?? null,
+        recovered: action.recovered ?? false,
         doc: action.doc,
-        savedDoc: action.doc,
+        // A recovered drawing has never been saved in this form: keep it marked modified.
+        savedDoc: action.recovered ? createEmptyDocument() : action.doc,
         selection: [],
         past: [],
         future: [],
@@ -436,7 +451,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       };
     }
     case 'markSaved':
-      return { ...state, savedDoc: state.doc, filePath: action.path, fileName: action.name, sourceVersion: null, message: `Saved ${action.name}` };
+      return { ...state, savedDoc: state.doc, filePath: action.path, fileName: action.name, sourceVersion: null, recovered: false, message: `Saved ${action.name}` };
     case 'setMessage':
       return { ...state, message: action.message };
   }

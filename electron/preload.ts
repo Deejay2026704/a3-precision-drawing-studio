@@ -6,7 +6,23 @@ contextBridge.exposeInMainWorld('a3Studio', {
   openDrawing: () => ipcRenderer.invoke('file:open'),
   saveDrawing: (path: string, content: string) => ipcRenderer.invoke('file:save', path, content),
   saveDrawingAs: (content: string, suggestedName: string) => ipcRenderer.invoke('file:saveAs', content, suggestedName),
+  exportPdf: (bytes: Uint8Array, suggestedName: string) => ipcRenderer.invoke('file:exportPdf', bytes, suggestedName),
   exportSvg: (content: string, suggestedName: string) => ipcRenderer.invoke('file:exportSvg', content, suggestedName),
+  readPath: (filePath: string) => ipcRenderer.invoke('file:readPath', filePath),
+  takePendingOpen: () => ipcRenderer.invoke('app:takePendingOpen'),
+  onOpenFile: (cb: (filePath: string) => void) => {
+    const h = (_e: unknown, p: string) => cb(p);
+    ipcRenderer.on('app:openFile', h);
+    return () => ipcRenderer.removeListener('app:openFile', h);
+  },
+  config: () => ipcRenderer.invoke('app:config'),
+  autosave: {
+    write: (content: string) => ipcRenderer.invoke('autosave:write', content),
+    clear: () => ipcRenderer.invoke('autosave:clear'),
+    orphans: () => ipcRenderer.invoke('autosave:orphans'),
+    read: (id: string) => ipcRenderer.invoke('autosave:read', id),
+    remove: (id: string) => ipcRenderer.invoke('autosave:remove', id),
+  },
   setDirty: (dirty: boolean) => ipcRenderer.send('doc:dirty', dirty),
   quit: () => ipcRenderer.send('app:quit'),
 });

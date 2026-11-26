@@ -15,9 +15,10 @@ interface Props {
   feedback: string | null;
   zoom: number;
   view: ViewCommands;
+  autosave: string;
 }
 
-export function StatusBar({ state, dispatch, cursor, feedback, zoom, view }: Props) {
+export function StatusBar({ state, dispatch, cursor, feedback, zoom, view, autosave }: Props) {
   const n = state.selection.length;
   const v = state.view;
   return (
@@ -41,6 +42,9 @@ export function StatusBar({ state, dispatch, cursor, feedback, zoom, view }: Pro
         {state.message}
       </span>
       <ConstraintSummary state={state} />
+      <span className="status-cell status-autosave" data-testid="status-autosave" title="Automatic crash-recovery backup (kept separately from your project file). Toggle in the File menu.">
+        {autosave}
+      </span>
       <button
         className={`status-toggle${v.objectSnap ? ' on' : ''}`}
         data-testid="status-osnap"

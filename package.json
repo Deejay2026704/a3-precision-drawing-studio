@@ -1,7 +1,7 @@
 {
   "name": "a3-precision-drawing-studio",
   "productName": "A3 Precision Drawing Studio",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "Precision 2D drawing and editing on an A3 sheet",
   "private": true,
   "type": "module",
@@ -13,25 +13,34 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
-    "e2e": "node tests-e2e/electron-smoke.mjs && node tests-e2e/milestone2.mjs && node tests-e2e/milestone3.mjs",
+    "e2e": "node tests-e2e/electron-smoke.mjs && node tests-e2e/milestone2.mjs && node tests-e2e/milestone3.mjs && node tests-e2e/milestone4.mjs",
     "e2e:m1": "node tests-e2e/electron-smoke.mjs",
     "e2e:m2": "node tests-e2e/milestone2.mjs",
-    "e2e:m3": "node tests-e2e/milestone3.mjs"
+    "e2e:m3": "node tests-e2e/milestone3.mjs",
+    "dist": "npm run build && electron-builder --config electron-builder.config.cjs",
+    "dist:win": "npm run build && electron-builder --config electron-builder.config.cjs --win",
+    "dist:mac": "npm run build && electron-builder --config electron-builder.config.cjs --mac",
+    "dist:dir": "npm run build && electron-builder --config electron-builder.config.cjs --dir",
+    "e2e:m4": "node tests-e2e/milestone4.mjs",
+    "e2e:packaged": "node tests-e2e/packaged-smoke.mjs"
   },
   "license": "UNLICENSED",
-  "dependencies": {
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1"
-  },
   "devDependencies": {
     "@types/node": "^26.6.11",
     "@types/react": "^19.3.3",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
     "electron": "^45.5.0",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "vitest": "^5.1.2"
-  }
+  },
+  "author": {
+    "name": "A3 Precision Drawing Studio"
+  },
+  "homepage": "https://github.com/Deejay2026704/a3-precision-drawing-studio"
 }

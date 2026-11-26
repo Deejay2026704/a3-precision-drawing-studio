@@ -7,12 +7,14 @@ import { moveDimension } from '../model/dimensions';
 import { createIdGenerator } from '../model/ids';
 import { moveShape } from '../model/operations';
 import { addConstraint, constraintFromSelection } from '../model/constraints';
-import type { ConstraintKind } from '../model/types';
+import type { ConstraintKind, DrawingDocument } from '../model/types';
 import { DocumentFormatError, FILE_EXTENSION, FILE_FORMAT_VERSION, parseProject, serializeProject } from '../storage/documentStorage';
 import { exportSvg } from '../storage/exportSvg';
+import { exportPdf } from '../storage/exportPdf';
 import { useDialog } from './Dialog';
 import { LayersPanel } from './LayersPanel';
-import { baseName, getFileService } from '../storage/fileService';
+import { baseName, getAutosaveService, getFileService } from '../storage/fileService';
+import { autosaveDue, DEFAULT_AUTOSAVE_INTERVAL_MS, makeAutosaveRecord, parseAutosaveRecord } from '../storage/autosave';
 import { DrawingCanvas } from './DrawingCanvas';
 import { FileMenu, type FileCommands } from './FileMenu';
 import { PropertiesPanel } from './PropertiesPanel';
@@ -111,6 +113,167 @@ export function App() {
     },
   };
 
+  // ---- autosave (crash recovery; never writes the project file) ----
+  const autosaveSvc = useMemo(() => getAutosaveService(), []);
+  const [autosaveOn, setAutosaveOn] = useState(() => localStorage.getItem('a3-autosave-enabled') !== 'false');
+  const autosaveOnRef = useRef(autosaveOn);
+  autosaveOnRef.current = autosaveOn;
+  const [autosaveInfo, setAutosaveInfo] = useState('');
+  const lastAutosave = useRef<{ doc: DrawingDocument | null; at: number }>({ doc: null, at: Date.now() });
+  const intervalMs = useRef(DEFAULT_AUTOSAVE_INTERVAL_MS);
+
+  const writeAutosave = useCallback(
+    async (content?: string) => {
+      const s = stateRef.current;
+      await autosaveSvc.write(content ?? makeAutosaveRecord(serializeProject(s.doc, projectSettingsOf(s)), s.fileName, s.filePath, new Date()));
+      lastAutosave.current = { doc: s.doc, at: Date.now() };
+      setAutosaveInfo(`Autosaved ${new Date().toLocaleTimeString()}`);
+    },
+    [autosaveSvc],
+  );
+
+  useEffect(() => {
+    void window.a3Studio?.config().then((c) => {
+      if (c.autosaveIntervalMs) intervalMs.current = c.autosaveIntervalMs;
+    });
+    const t = window.setInterval(() => {
+      const s = stateRef.current;
+      const due = autosaveDue({
+        enabled: autosaveOnRef.current,
+        dirty: isDirty(s),
+        doc: s.doc,
+        lastDoc: lastAutosave.current.doc,
+        lastAtMs: lastAutosave.current.at,
+        nowMs: Date.now(),
+        intervalMs: intervalMs.current,
+        editing: s.editBase !== null,
+      });
+      if (due) writeAutosave().catch((err: Error) => setAutosaveInfo(`⚠ Autosave failed: ${err.message}`));
+    }, 1000);
+    return () => window.clearInterval(t);
+  }, [writeAutosave]);
+
+  // Saved, discarded, or undone back to the saved state: the recovery copy is no longer needed.
+  useEffect(() => {
+    if (!dirty) {
+      void autosaveSvc.clear();
+      lastAutosave.current = { doc: null, at: Date.now() };
+      setAutosaveInfo('');
+    }
+  }, [dirty, autosaveSvc]);
+
+  const toggleAutosave = () => {
+    const on = !autosaveOnRef.current;
+    localStorage.setItem('a3-autosave-enabled', String(on));
+    setAutosaveOn(on);
+    if (!on) void autosaveSvc.clear();
+    setAutosaveInfo('');
+    lastAutosave.current = { doc: null, at: Date.now() };
+    dispatch({ type: 'setMessage', message: `Autosave ${on ? 'on' : 'off'}` });
+  };
+
+  /** At start-up: offer drawings left behind by a crashed session. Returns true if one was recovered. */
+  const offerRecovery = async (): Promise<boolean> => {
+    const orphans = await autosaveSvc.orphans().catch(() => []);
+    for (const o of orphans) {
+      let text = '';
+      let rec: ReturnType<typeof parseAutosaveRecord>;
+      try {
+        text = await autosaveSvc.read(o.id);
+        rec = parseAutosaveRecord(text);
+      } catch (err) {
+        const a = await ask({
+          title: 'Damaged automatic backup',
+          message: 'An automatic backup from an earlier session could not be read.',
+          detail: [(err as Error).message],
+          buttons: [
+            { id: 'keep', label: 'Keep it', kind: 'primary' },
+            { id: 'delete', label: 'Delete it', kind: 'danger' },
+          ],
+          cancelId: 'keep',
+          testId: 'dialog-recovery-damaged',
+        });
+        if (a.button === 'delete') await autosaveSvc.remove(o.id);
+        continue;
+      }
+      const { record, loaded } = rec;
+      const a = await ask({
+        title: 'Recover unsaved drawing?',
+        message: `The application closed before "${record.fileName}" was saved. An automatic backup was found.`,
+        detail: [
+          `Backed up: ${new Date(record.savedAt).toLocaleString()}`,
+          `Original file: ${record.filePath ?? '(never saved)'}`,
+          `${loaded.doc.shapes.length} objects, ${loaded.doc.dimensions.length} dimensions, ${loaded.doc.constraints.length} constraints`,
+          'Recovering opens it as an UNSAVED drawing – your original file is not changed until you save.',
+        ],
+        buttons: [
+          { id: 'recover', label: 'Recover', kind: 'primary' },
+          { id: 'later', label: 'Keep for later' },
+          { id: 'discard', label: 'Discard backup', kind: 'danger' },
+        ],
+        cancelId: 'later',
+        testId: 'dialog-recovery',
+      });
+      if (a.button === 'recover') {
+        dispatch({
+          type: 'loadDocument',
+          doc: loaded.doc,
+          path: record.filePath,
+          name: record.fileName,
+          settings: loaded.settings,
+          sourceVersion: loaded.sourceVersion,
+          recovered: true,
+          message: `Recovered "${record.fileName}" from the backup of ${new Date(record.savedAt).toLocaleTimeString()} – not saved yet`,
+        });
+        fit();
+        // Hand the backup over to this session BEFORE deleting the old one: there is always a copy.
+        await autosaveSvc.write(text);
+        lastAutosave.current = { doc: null, at: Date.now() };
+        await autosaveSvc.remove(o.id);
+        return true;
+      }
+      if (a.button === 'discard') {
+        const sure = await ask({
+          title: 'Discard backup permanently?',
+          message: `The unsaved changes to "${record.fileName}" will be lost. This cannot be undone.`,
+          buttons: [
+            { id: 'cancel', label: 'Keep it', kind: 'primary' },
+            { id: 'discard', label: 'Discard', kind: 'danger' },
+          ],
+          cancelId: 'cancel',
+          testId: 'dialog-recovery-confirm',
+        });
+        if (sure.button === 'discard') await autosaveSvc.remove(o.id);
+      }
+    }
+    return false;
+  };
+
+  // Files handed over by the OS (double-click, "Open with", second launch, macOS open-file).
+  const openPathRef = useRef<(p: string) => Promise<void>>(async () => undefined);
+  openPathRef.current = async (p: string) => {
+    if (!window.a3Studio) return;
+    if (!(await confirmDiscard(`opening "${baseName(p)}"`))) return;
+    try {
+      const res = await window.a3Studio.readPath(p);
+      await openText(res.path, res.content);
+    } catch (err) {
+      dispatch({ type: 'setMessage', message: `⚠ Could not open ${baseName(p)}: ${(err as Error).message}` });
+    }
+  };
+  const startupDone = useRef(false);
+  useEffect(() => {
+    if (startupDone.current) return;
+    startupDone.current = true;
+    void (async () => {
+      const recovered = await offerRecovery();
+      const pending = await window.a3Studio?.takePendingOpen();
+      if (pending && !recovered) await openPathRef.current(pending);
+    })();
+    return window.a3Studio?.onOpenFile((p) => void openPathRef.current(p));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ---- file commands ----
   const [dialog, ask] = useDialog();
 
@@ -142,6 +305,22 @@ export function App() {
   const save = async (): Promise<boolean> => {
     const s = stateRef.current;
     if (!s.filePath || !files.canSaveInPlace) return saveAs();
+    if (s.recovered) {
+      const a = await ask({
+        title: 'Save recovered drawing?',
+        message: `This drawing was recovered from an automatic backup. Save it over the original file "${s.fileName}"?`,
+        detail: ['The original file may contain an older version of this drawing (or may have been changed since).', 'Choose "Save as a new file…" to keep the original as it is.'],
+        buttons: [
+          { id: 'overwrite', label: 'Save over original', kind: 'primary' },
+          { id: 'saveas', label: 'Save as a new file…' },
+          { id: 'cancel', label: 'Cancel' },
+        ],
+        cancelId: 'cancel',
+        testId: 'dialog-save-recovered',
+      });
+      if (a.button === 'cancel') return false;
+      if (a.button === 'saveas') return saveAs();
+    }
     if (s.sourceVersion !== null && s.sourceVersion < FILE_FORMAT_VERSION) {
       const a = await ask({
         title: 'Upgrade project file?',
@@ -193,6 +372,44 @@ export function App() {
     return true;
   };
 
+  /** Parse and load project text; on any problem show it and leave the open drawing untouched. */
+  const openText = async (path: string, content: string) => {
+    try {
+      const loaded = parseProject(content);
+      dispatch({
+        type: 'loadDocument',
+        doc: loaded.doc,
+        path,
+        name: baseName(path),
+        settings: loaded.settings,
+        sourceVersion: loaded.sourceVersion,
+        message: `Opened ${baseName(path)}${loaded.sourceVersion < FILE_FORMAT_VERSION ? ` (upgraded from format ${loaded.sourceVersion})` : ''}`,
+      });
+      fit();
+      if (loaded.warnings.length) {
+        await ask({
+          title: 'Opened with notes',
+          message: `"${baseName(path)}" was opened. Please review:`,
+          detail: loaded.warnings,
+          buttons: [{ id: 'ok', label: 'OK', kind: 'primary' }],
+          cancelId: 'ok',
+          testId: 'dialog-warnings',
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof DocumentFormatError ? err.message : (err as Error).message;
+      dispatch({ type: 'setMessage', message: `Could not open file: ${msg}` });
+      await ask({
+        title: 'Cannot open file',
+        message: `"${baseName(path)}" could not be opened.`,
+        detail: [msg, 'Your current drawing has not been changed.'],
+        buttons: [{ id: 'ok', label: 'OK', kind: 'primary' }],
+        cancelId: 'ok',
+        testId: 'dialog-error',
+      });
+    }
+  };
+
   const fileCommands: FileCommands = {
     newDrawing: async () => {
       if (!(await confirmDiscard('creating a new drawing'))) return;
@@ -208,47 +425,24 @@ export function App() {
         dispatch({ type: 'setMessage', message: `Could not read file: ${(err as Error).message}` });
         return;
       }
-      if (!res) return;
-      try {
-        const loaded = parseProject(res.content);
-        dispatch({
-          type: 'loadDocument',
-          doc: loaded.doc,
-          path: res.path,
-          name: baseName(res.path),
-          settings: loaded.settings,
-          sourceVersion: loaded.sourceVersion,
-          message: `Opened ${baseName(res.path)}${loaded.sourceVersion < FILE_FORMAT_VERSION ? ` (upgraded from format ${loaded.sourceVersion})` : ''}`,
-        });
-        fit();
-        if (loaded.warnings.length) {
-          await ask({
-            title: 'Opened with notes',
-            message: `"${baseName(res.path)}" was opened. Please review:`,
-            detail: loaded.warnings,
-            buttons: [{ id: 'ok', label: 'OK', kind: 'primary' }],
-            cancelId: 'ok',
-            testId: 'dialog-warnings',
-          });
-        }
-      } catch (err) {
-        const msg = err instanceof DocumentFormatError ? err.message : (err as Error).message;
-        dispatch({ type: 'setMessage', message: `Could not open file: ${msg}` });
-        await ask({
-          title: 'Cannot open file',
-          message: `"${baseName(res.path)}" could not be opened.`,
-          detail: [msg, 'Your current drawing has not been changed.'],
-          buttons: [{ id: 'ok', label: 'OK', kind: 'primary' }],
-          cancelId: 'ok',
-          testId: 'dialog-error',
-        });
-      }
+      if (res) await openText(res.path, res.content);
     },
     save: async () => {
       await save();
     },
     saveAs: async () => {
       await saveAs();
+    },
+    exportPdf: async () => {
+      const s = stateRef.current;
+      const name = s.fileName.replace(/\.a3d$/i, '') + '.pdf';
+      try {
+        const bytes = exportPdf(s.doc, { title: s.fileName.replace(/\.a3d$/i, '') });
+        const path = await files.exportPdf(bytes, name);
+        if (path) dispatch({ type: 'setMessage', message: `Exported ${baseName(path)} – A3 at true scale (print at 100 % / Actual size), visible layers only` });
+      } catch (err) {
+        dispatch({ type: 'setMessage', message: `⚠ PDF export failed: ${(err as Error).message}` });
+      }
     },
     exportSvg: async () => {
       const s = stateRef.current;
@@ -260,6 +454,8 @@ export function App() {
         dispatch({ type: 'setMessage', message: `⚠ Export failed: ${(err as Error).message}` });
       }
     },
+    toggleAutosave,
+    autosaveLabel: `Autosave: ${autosaveOn ? 'On' : 'Off'} (every ${Math.round(DEFAULT_AUTOSAVE_INTERVAL_MS / 60000)} min)`,
     exit: () => (window.a3Studio ? window.a3Studio.quit() : window.close()),
   };
 
@@ -294,6 +490,7 @@ export function App() {
         return;
       }
       if (ctrl && key === 'o') return e.preventDefault(), void f.open();
+      if (ctrl && key === 'p') return e.preventDefault(), void f.exportPdf();
       if (ctrl && key === 'n') return e.preventDefault(), void f.newDrawing();
       if (typing) return;
       if (ctrl && key === 'z') return e.preventDefault(), e.shiftKey ? ed.redo() : ed.undo();
@@ -379,7 +576,7 @@ export function App() {
         </div>
       </main>
       {dialog}
-      <StatusBar state={state} dispatch={dispatch} cursor={cursor} feedback={feedback} zoom={viewport.zoom} view={view} />
+      <StatusBar state={state} dispatch={dispatch} cursor={cursor} feedback={feedback} zoom={viewport.zoom} view={view} autosave={autosaveOn ? autosaveInfo || 'Autosave on' : 'Autosave off'} />
     </div>
   );
 }
