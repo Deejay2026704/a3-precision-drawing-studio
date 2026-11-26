@@ -1,5 +1,74 @@
 # Development Status
 
+## Milestone 6 — Polylines, fill/hatch, text, fillets with curves, Letter printing (26 Nov 2026)
+
+Built on Milestone 5 without removing or redesigning anything. Project format **5**
+(text, closed polylines, fills – additive; v1–v4 files are migrated on open, and older
+app versions refuse v5 files rather than silently dropping fills). App version 0.6.0.
+
+### Polylines and polygons — complete
+Polyline tool (`P`): click points; Enter or double-click finishes, clicking the first
+point closes, Backspace removes the last point. Polygon tool (`G`): centre + corner, or by
+numbers (3–64 sides, radius to corners or across flats, first-corner angle). Polylines can
+be closed/opened in Properties (perimeter and area shown); every vertex has a grip;
+offsetting a closed polyline gives a closed, mitred result. **Trim** now works on
+polylines: open ones lose an end or split in two; a closed one crossed at least twice
+opens up. (Dimensions attached to a trimmed polyline's vertices are fixed in place,
+because the vertex numbering changes.)
+
+### Fill and hatch — complete
+Rectangles, circles and closed polylines: Solid, Hatch or Cross-hatch, with colour
+(By layer or a pen colour), angle and spacing. Spacing is in paper mm (same look at every
+scale) and hatch lines are anchored to the drawing origin so neighbouring areas line up.
+Drawn on the canvas, in SVG and PDF (vector lines, 0.18 mm). A filled shape can be
+selected by clicking anywhere inside it. Hatches needing more than 2,000 lines per
+direction are not drawn and Properties says so.
+
+### Text notes — complete
+Text tool (`X`, Annotate tab): click to place, type in Properties (multi-line). Height
+(drawing mm, or on paper), rotation and position editable; move, rotate, scale and mirror
+(mirrored text stays readable). Rendered and exported as real Helvetica text (selectable
+in the PDF), with the same font metrics everywhere.
+
+### Fillet with arcs and circles — complete
+Fillet now works line–arc, line–circle, arc–arc, arc–circle and circle–circle, with exact
+tangency; the picks choose which of the possible fillets is made. Lines and arcs are
+trimmed/extended to the tangent points; full circles are left whole. Chamfer remains
+line–line.
+
+### US Letter printing — complete
+File ▸ Export PDF for an A4 / Letter printer: A4 or US Letter, tiled at true scale (4
+pages) or fitted (NOT TO SCALE).
+
+### Verification
+* Unit tests: **35 files, 358 tests passing**; typecheck clean.
+* End-to-end (local, real Electron): M1 64, M2 62, M3 78, M4 31, M5 53, **M6 32** – all
+  passing; packaged Linux build 18/18. Hatch/fill/text output also checked visually from a
+  PDF rendered with poppler.
+* CI: __CI_RESULT__
+
+### Defects found and fixed during Milestone 6
+1. A newly placed text's input box lost keyboard focus to the click that placed it, so
+   typing went to the tool shortcuts (found by the M6 end-to-end suite) – focus is now set
+   after the click completes.
+
+### Not done in Milestone 6 (needs you)
+* **Code signing** – still needs your certificates (README ▸ Code signing).
+* **A first real release** – pushing a tag such as `v0.6.0` publishes a public GitHub
+  Release with the installers and the auto-update feed. I have not done this without your
+  go-ahead.
+
+### Known limitations (Milestone 6)
+* Polyline segments are straight (no arc segments); no splines or ellipses.
+* Hatch patterns are lines only (no ANSI/ISO material patterns, no islands/holes);
+  rectangles are filled but cannot be trimmed.
+* Text uses Helvetica only; no text styles, alignment options or in-place editing on the
+  canvas (editing is in Properties).
+* Chamfer works only between lines; fillet leaves full circles untrimmed.
+* Installers are still unsigned.
+
+---
+
 ## Milestone 5 — Arcs, fillet/chamfer, new constraints, title block, A4 printing, auto-update (26 Nov 2026)
 
 Built on Milestone 4 without removing or redesigning anything. The project format moved
@@ -398,9 +467,9 @@ Windows packaging (electron-builder NSIS), snapping to object points, a coordina
 command line (e.g. `@100<30`), dimensions, layers, print or PDF export at true scale,
 and filled shapes with inside hit-testing.
 
-## Recommended Milestone 6
+## Recommended Milestone 7
 
-Signed and notarised releases (once certificates exist) with a first real `v0.5.0`
-release to exercise auto-update end to end; fillet/chamfer between lines and arcs;
-polylines/polygons that can be trimmed and filled (hatching); text/notes on the
-drawing; configurable title block and print scaling to other paper sizes.
+First signed public release (`v0.6.0`) and a live auto-update from it; DXF import/export
+for exchange with other CAD software; arc segments in polylines; hatch islands (holes)
+and standard material patterns; text styles and alignment; blocks/symbols (reusable
+grouped objects).

@@ -1,4 +1,4 @@
-# Test Plan: Milestones 1–5
+# Test Plan: Milestones 1–6
 
 There are three levels of testing:
 
@@ -78,6 +78,18 @@ Last full result: **30 files, 315 tests, all passing**.
 | Title block / print layouts | `tests/titleBlockPrint.test.ts` | frame and block inside the sheet margins; auto scale and sheet size; long text truncated with "…"; hidden ⇒ nothing exported; SVG group; A4 tiles cover the sheet with overlap and at true scale; fit layout scale factor; Windows-1252 text (– — × ± µ € …; other characters still print as `?`); **poppler** page counts, sizes and text |
 | Updates | `tests/updatePolicy.test.ts` | per-platform mode (Windows install, unsigned macOS notify, others/dev none); release-page URL only for this repository; only http(s) update servers; short error messages |
 | Storage | `tests/storage.test.ts`, `tests/titleBlockPrint.test.ts`, `tests/arcs.test.ts` | the existing v1–v3 migration tests now end at v4; older files get a hidden title block; invalid arc sweeps and title-block text rejected |
+
+### Milestone 6 unit tests (added)
+
+Last full result: **35 files, 358 tests, all passing**.
+
+| Area | File | What is verified |
+| --- | --- | --- |
+| Polylines / polygons | `tests/polylines.test.ts` | closing segment in length, area, hit test, snaps and cutting edges; regular polygons (exact corners, area, validation); offset of a closed polyline (mitred all round, inwards and outwards); vertex grips; `closed` saved/loaded (open polylines unchanged, closed needs 3 points); trimming open polylines (end, start, split) and closed ones (crossed twice → opened, exact remaining path; crossed once → refused); Polyline tool (clicks, Backspace, repeated click, Enter, close on first point) and Polygon tool |
+| Fill / hatch | `tests/fill.test.ts` | hatch line count/length on a square; 45° lines end on the boundary and lie inside; lines anchored to the origin (neighbours line up); circles; concave outlines (several pieces per line); spacing in paper mm at 1:2; cross-hatch; too dense → refused; only closed shapes fillable; inside-pick for filled shapes; SVG/PDF fill colours, disc for circles, hatch lines; file round trip and validation paths |
+| Text | `tests/text.test.ts` | box width from Helvetica metrics, ascender/descender; line spacing and rotation; pick on the box; move/rotate/scale; mirroring keeps text readable; no offset, not a cutting edge; file round trip and limits; one text item per line at the scaled size in SVG/PDF; Text tool; v4 → v5 migration notice; newer files refused |
+| Fillet with curves | `tests/filletCurves.test.ts` | line–circle (exact centre √180, 8; tangent points; circle untouched); picks choose the side; line–arc (arc trimmed at the tangent angle); circle–circle (centre (20, 15), sweep 106.26°); refusals (no room, radius 0 with a curve, same object); line–line unchanged; Fillet tool with a line and a circle |
+| Letter | `tests/letterPrint.test.ts` | Letter tiles cover the A3 sheet with the overlap; 4 pages 792 × 612 pt at true scale; fit page labelled; poppler reads "letter" |
 
 ## 2. End-to-end smoke test: `npm run e2e`
 
@@ -216,6 +228,21 @@ pages each labelled "Page i of 4", A4 fit = 1 page marked NOT TO SCALE, Cancel w
 nothing (checked with poppler); SVG has the title block; Save As format 4 and reopen
 identical; Check for updates in the development build explains it only works installed.
 
+### Milestone 6 end-to-end suite: `tests-e2e/milestone6.mjs` (development build)
+
+Last local result: **32 checks passed, 0 failed** (with M1 64, M2 62, M3 78, M4 31,
+M5 53 and the packaged build 18 in the same session).
+Ribbon tabs keep the drawing area still; Polyline: Backspace removes the last point
+(not the selection), Enter finishes with exactly the clicked points, clicking the first
+point closes, double-click finishes; perimeter 160 / area 1600 in Properties; Polygon by
+numbers (6 corners exactly 20 mm out) and by clicks (sides kept); Fill panel only for
+closed shapes; hatch drawn, 5 mm spacing at 0° gives 8 lines on a 40 mm square; solid
+fill; click inside a filled shape selects it; Text: one click places it, the text box has
+focus, two typed lines (with – and Ø) applied and drawn, rotation and undo; polyline
+trim preview and exact result (60, 200); fillet R8 line–circle exact; Letter tiled PDF
+(4 pages, poppler "letter"); the text is real text in the PDF; SVG has fill and text;
+format 5 save/reopen identical; no renderer errors.
+
 ### Installed-app update test: `tests-e2e/update-e2e.mjs` (CI, Windows and macOS)
 
 CI builds a second, newer version (99.0.0) of the app, serves it from a local HTTP server
@@ -287,3 +314,7 @@ Run `npm install` and then `npm run dev`, and check each item:
 - [ ] (M5) Add Fixed radius to an arc and Angle between two lines; change the values
 - [ ] (M5) Turn on the title block, fill it in; export the A3 PDF and the A4 tiled PDF; print a tile at 100 % and measure
 - [ ] (M5) After a newer release is published: the installed app offers it; Windows installs it on restart
+- [ ] (M6) Draw a polyline (Enter to finish) and a closed one; a hexagon by numbers; trim a polyline
+- [ ] (M6) Hatch, cross-hatch and solid-fill a closed shape; print the PDF and check the hatch
+- [ ] (M6) Add a two-line text note, rotate it, mirror it (it stays readable); fillet a line to a circle
+- [ ] (M6) Export the US Letter tiled PDF and print one page at 100 %

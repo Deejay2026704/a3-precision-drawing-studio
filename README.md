@@ -3,10 +3,10 @@
 A Windows desktop application for precise 2D drawing and editing on an A3 sheet.
 It is a precision drawing tool (CAD-style), **not** a publishing application.
 
-Current state: **Milestone 5** — arcs, trimming circles, fillet/chamfer, radius and
-angle constraints, a title block, A4 print layouts and auto-update, on top of
-Milestones 1–4 (drawing, editing, snaps, dimensions, constraints, layers, robust project
-files, installers, PDF export, autosave). See `DEVELOPMENT_STATUS.md`.
+Current state: **Milestone 6** — polylines and polygons, fill and hatch, text notes,
+fillets with arcs and circles, and US Letter printing, on top of Milestones 1–5 (drawing,
+editing, snaps, dimensions, constraints, layers, project files, installers, PDF export,
+autosave, arcs, title block, auto-update). See `DEVELOPMENT_STATUS.md`.
 
 ## Installing (end users)
 
@@ -71,7 +71,7 @@ npm run dist:win   # Windows NSIS installer (run on Windows)  → release/
 npm run dist:mac   # macOS DMG + ZIP (run on a Mac)           → release/
 npm run dist:dir   # unpacked app for the current OS (testing)
 npm run e2e:packaged -- "<app executable>"   # smoke-test an installed/packaged app
-npm run e2e        # all end-to-end suites (M1–M5) driving the real Electron window (needs `playwright`)
+npm run e2e        # all end-to-end suites (M1–M6) driving the real Electron window (needs `playwright`)
 ```
 
 Screenshots taken from the real app during verification are in `docs/screenshots/`.
@@ -88,6 +88,10 @@ On Linux when running as root (e.g. in a container) Electron needs
 | Select tool | Home ▸ Select, or `V` / `Esc` |
 | Line / Rectangle / Circle / Arc / Freehand | Draw ribbon, or `L` / `R` / `C` / `A` / `F` |
 | Arc | `A`, then click the start, a point on the arc, and the end (3 points). Or type centre, radius, start angle and sweep in Properties ▸ "by numbers" (angles counter-clockwise from +X) |
+| Polyline | `P` (Draw ▸ Polyline): click the points. **Enter** or a **double-click** finishes; clicking the **first point** again closes it; **Backspace** removes the last point; Esc cancels. Properties ▸ *Closed* opens/closes an existing polyline and shows perimeter and area. Every vertex has a grip |
+| Polygon | `G` (Draw ▸ Polygon): click the centre, then a corner. Number of sides (3–64) in Properties, where you can also create one by numbers (centre, radius to the corners or across flats, first-corner angle) |
+| Fill / hatch | select a rectangle, circle or closed polyline: Properties ▸ **Fill** ▸ None / Solid / Hatch / Cross-hatch, with colour, angle and spacing (spacing is on paper, so it looks the same at any scale). Filled shapes can be clicked anywhere inside |
+| Text | `X` (Annotate ▸ Text): click where the text starts, then type in Properties (**Enter** = new line, **Ctrl+Enter** or clicking away applies, Esc cancels). Height (drawing mm or on paper), rotation and position are editable; text moves, rotates and mirrors (it is never written backwards) |
 | Draw | press, drag, release on the sheet. `Shift` = 15° angle steps for lines, square for rectangles |
 | Select multiple | `Shift`/`Ctrl` + click, or drag a selection window over empty space |
 | Move | drag a selected object; arrow keys nudge 1 mm (`Shift` = 10 mm) |
@@ -105,8 +109,8 @@ On Linux when running as root (e.g. in a container) Electron needs
 | Draw by numbers | with Line / Rectangle / Circle active, type values in Properties ▸ "by numbers" and press **Create** |
 | Object snaps | Draw ▸ Snap: Endpoint, Midpoint, Centre, Intersection, Perpendicular, Tangent, Nearest (each toggleable). `F3` or **OSNAP** in the status bar toggles all |
 | Grid snap / grid | `F9` or **GRID** in the status bar; increment on Draw ▸ Snap ▸ Step. Grid spacing on View ▸ Show |
-| Trim / Extend | `T` / `E`, then click the part to remove / near the end to extend. Trim works on lines, circles (the circle becomes an arc; it needs two crossings) and arcs. The part that will go is shown dashed red before you click |
-| Fillet / Chamfer | Draw ▸ Modify ▸ Fillet or Chamfer. Set the radius / distance in Properties, then click the two lines on the parts to keep. The lines are trimmed and an arc (fillet) or a line (chamfer) is added in one undo step. 0 = sharp corner |
+| Trim / Extend | `T` / `E`, then click the part to remove / near the end to extend. Trim works on lines, circles (the circle becomes an arc; it needs two crossings), arcs and polylines (a closed polyline needs two crossings and becomes open). The part that will go is shown dashed red before you click |
+| Fillet / Chamfer | Draw ▸ Modify ▸ Fillet or Chamfer. Set the radius / distance in Properties, then click the two objects on the parts to keep. Fillet works between lines, arcs and circles (lines and arcs are trimmed/extended to the tangent points; circles stay whole); Chamfer between two lines. One undo step. 0 = sharp corner (lines only) |
 | Offset | `O`, set the distance on Draw ▸ Modify, click an object, then the side |
 | Mirror | `M`; with objects selected (or Shift+click them in the tool) click two points on the mirror line. "Mirror keeps source" = copy |
 | Grips | select an object: filled squares are grips — line ends, polyline ends, centre/midpoint (move). Grips snap |
@@ -117,7 +121,7 @@ On Linux when running as root (e.g. in a container) Electron needs
 | Edit a constraint | click its purple marker: Properties shows status, value (length, angle, radius, angle between lines 0–180°, position), Suppress, Delete |
 | Title block | click an empty part of the sheet: Properties ▸ **Title block** ▸ Show. Fill in title, drawing number, revision, drawn/checked by, date (today's date is filled in) and company. Scale and sheet size are filled in automatically. It is printed and exported with the drawing |
 | Export PDF | File ▸ Export PDF (A3, true scale)… (`Ctrl+P`): vector PDF, visible layers only (each a PDF layer). Print at **100 % / Actual size** |
-| No A3 printer | File ▸ Export PDF for an A4 printer…: **Tiled** = 4 A4 landscape pages at true scale with 10 mm overlap, corner marks and "Page i of 4 – row/column" labels (print at 100 %, trim and tape); **Fit** = the whole sheet reduced onto one A4 page, marked NOT TO SCALE |
+| No A3 printer | File ▸ Export PDF for an A4 / Letter printer…: choose A4 or US Letter. **Tiled** = 4 landscape pages at true scale with 10 mm overlap, corner marks and "Page i of 4 – row/column" labels (print at 100 %, trim and tape); **Fit** = the whole sheet reduced onto one page, marked NOT TO SCALE |
 | Updates | File ▸ Check for updates… (see *Updates* above) |
 | Export SVG | File ▸ Export SVG… (visible layers only, true scale in mm) |
 | Autosave | on by default, every 2 minutes while there are unsaved changes; File ▸ *Autosave: On/Off*; status bar shows the last autosave |
@@ -260,6 +264,16 @@ backup is handed to the new session *before* the old copy is deleted, so a copy 
 | `electron/updatePolicy.ts`, `electron/updater.ts`, `ui/UpdateBanner.tsx` | auto-update (electron-updater, GitHub Releases), consent-first |
 | `tests-e2e/milestone5.mjs`, `tests-e2e/update-e2e.mjs` | M5 end-to-end suite; installed-app update test against a local update server (CI) |
 
+### Milestone 6 modules
+
+| Module | Responsibility |
+| --- | --- |
+| `model/polylineTrim.ts` | trimming open and closed polylines (position along the polyline as one parameter) |
+| `geometry/hatch.ts`, `model/fill.ts` | point-in-polygon, hatch lines clipped to an outline (anchored to the drawing origin), fill rules |
+| `geometry/helvetica.ts`, `model/text.ts` | Helvetica metrics shared by the canvas and the PDF writer; text box, line positions |
+| `model/filletCurves.ts` | fillets with arcs and circles (offset-locus construction) |
+| `tests-e2e/milestone6.mjs` | M6 end-to-end suite |
+
 ### Drawing objects (all in world mm)
 
 | Kind | Stored geometry |
@@ -268,10 +282,12 @@ backup is handed to the new session *before* the old copy is deleted, so a copy 
 | Rectangle | `origin` (base corner), `width`, `height`, `rotationDeg` (about `origin`) |
 | Circle | `center`, `radius` |
 | Arc | `center`, `radius`, `startDeg` (0–360), `sweepDeg` (0–360, counter-clockwise) |
-| Freehand polyline | `points[]` |
+| Text | `position` (start of the first baseline), `text` (lines separated by `\n`), `height` (font size, drawing mm), `rotationDeg` |
+| Polyline / polygon | `points[]`, `closed` (polygons and closed polylines) |
 
 Each object also has a style: stroke colour and line weight in **paper** mm
-(line weights are a property of the printed sheet and do not scale with the drawing).
+(line weights are a property of the printed sheet and do not scale with the drawing),
+and for closed shapes an optional `fill` (pattern, colour, angle, spacing in paper mm).
 
 ### Project folder structure
 
@@ -284,7 +300,8 @@ scripts/             dev.mjs (Vite + Electron dev runner), build-electron.mjs, e
 src/
   geometry/          vec, angles, bounds, page (A3), scale, viewport, coords, intersect
   model/             types, shapes, operations, handles, hitTest, document,
-                     anchors, snap, dimensions, modify, layers, constraints, arcs, curves, titleBlock
+                     anchors, snap, dimensions, modify, layers, constraints, arcs, curves, titleBlock,
+                     polylineTrim, fill, text, filletCurves
   storage/           documentStorage (schema, migration, validation), drawingPrimitives, exportSvg,
                      exportPdf, autosave, fileService (IPC adapter)
   render/            ShapeView, PageView, GridView, Rulers, SelectionOverlay, rulerTicks
@@ -293,17 +310,17 @@ src/
   ui/interaction/    toolSession (click-driven modify/dimension tools)
   main.tsx           renderer entry
 tests/               Vitest unit tests (no UI, no DOM); tests/fixtures: real M1 (v1) and M2 (v2) files
-tests-e2e/           Playwright scripts that drive the real Electron window (M1–M5), packaged-app smoke test, update test
+tests-e2e/           Playwright scripts that drive the real Electron window (M1–M6), packaged-app smoke test, update test
 docs/screenshots/    screenshots captured by the end-to-end run
 ```
 
 ### File format
 
-`*.a3d` — UTF-8 JSON, format version 4 (v4 added arcs, the fixed-radius and angle
-constraints and `titleBlock`):
+`*.a3d` — UTF-8 JSON, format version 5 (v4 added arcs, the fixed-radius and angle
+constraints and `titleBlock`; v5 added text, closed polylines and fills):
 
 ```
-{ format: "a3-precision-drawing", formatVersion: 4, units: "mm",
+{ format: "a3-precision-drawing", formatVersion: 5, units: "mm",
   page: { widthMm, heightMm, orientation }, scale: { paper, real },
   layers: [{ id, name, visible, locked, color }],
   shapes: [... each with layerId], dimensions: [... each with layerId], constraints: [...],
@@ -311,7 +328,7 @@ constraints and `titleBlock`):
   settings: { activeLayerId, display: { showGrid, gridSpacingMm, gridSnap, gridSnapStepMm, objectSnap, osnap } } }
 ```
 
-* **Migration:** v1 (M1), v2 (M2) and v3 (M3/M4) files open and are migrated in memory (default layer,
+* **Migration:** v1 (M1), v2 (M2), v3 (M3/M4) and v4 (M5) files open and are migrated in memory (default layer,
   no constraints, default display settings); the user is told, and saving over an older
   file asks before upgrading it. Files from a newer version are refused.
 * **Validation:** every field is checked; errors name the exact path (e.g.
