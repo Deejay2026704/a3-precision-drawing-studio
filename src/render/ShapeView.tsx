@@ -6,6 +6,7 @@ import { pxPerPageMm } from '../geometry/viewport';
 import { pxPerWorldMm } from '../geometry/coords';
 import { arcEnd, arcStart } from '../model/arcs';
 import { rectCorners } from '../model/shapes';
+import { LINE_SPACING, textLines } from '../model/text';
 import type { Shape } from '../model/types';
 
 /** Minimum on-screen stroke so very thin pens remain visible when zoomed out (display only). */
@@ -80,6 +81,32 @@ const Outline = memo(function Outline({ shape, transform, stroke, dashed, solid 
       const rp = shape.radius * pxPerWorldMm(transform);
       // World CCW stays CCW on screen after the Y flip → SVG sweep-flag 0.
       return <path {...common} d={`M ${a.x} ${a.y} A ${rp} ${rp} 0 ${shape.sweepDeg > 180 ? 1 : 0} 0 ${b.x} ${b.y}`} />;
+    }
+    case 'text': {
+      const k = pxPerWorldMm(transform);
+      const size = shape.height * k;
+      const p = S(shape.position);
+      // World CCW rotation → clockwise on screen (Y down).
+      return (
+        <text
+          data-shape-id={shape.id}
+          data-kind="text"
+          x={p.x}
+          y={p.y}
+          fontSize={size}
+          fontFamily="Helvetica, Arial, sans-serif"
+          fill={stroke ?? shape.style.stroke}
+          transform={shape.rotationDeg ? `rotate(${-shape.rotationDeg} ${p.x} ${p.y})` : undefined}
+          style={{ whiteSpace: 'pre', userSelect: 'none' }}
+          opacity={dashed ? 0.6 : undefined}
+        >
+          {textLines(shape).map((line, i) => (
+            <tspan key={i} x={p.x} y={p.y + i * LINE_SPACING * size}>
+              {line || ' '}
+            </tspan>
+          ))}
+        </text>
+      );
     }
     case 'polyline':
       return shape.closed ? <polygon {...common} points={pts(shape.points.map(S))} /> : <polyline {...common} points={pts(shape.points.map(S))} />;

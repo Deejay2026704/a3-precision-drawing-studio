@@ -7,6 +7,7 @@ import { arcEnd, normalizeArc } from './arcs';
 import { trimCurve, trimCurvePreview } from './curves';
 import { trimPolyline, trimPolylinePreview } from './polylineTrim';
 import { rectCorners } from './shapes';
+import { textBoxLocal, textCenter } from './text';
 import type { DrawingDocument, LineShape, PolylineShape, RectShape, Shape, ShapeId } from './types';
 
 /**
@@ -215,6 +216,8 @@ export function offsetShape(doc: DrawingDocument, shapeId: ShapeId, dist: number
   if (!s) return fail('Object not found');
   let created: Shape;
   switch (s.kind) {
+    case 'text':
+      return fail('Text cannot be offset – use Duplicate (Ctrl+D) and move it');
     case 'line': {
       if (distance(s.start, s.end) < MIN_LEN) return fail('Cannot offset a zero-length line');
       const n = leftNormal(s.start, s.end);
@@ -285,6 +288,19 @@ export function mirrorShape<S extends Shape>(s: S, a: Vec2, b: Vec2): S {
     }
     case 'polyline':
       return { ...s, points: s.points.map(m) };
+    case 'text': {
+      // Text is never written backwards: the text box is mirrored, the text stays readable.
+      const axisDeg = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+      let rot = normalizeAngle(2 * axisDeg - s.rotationDeg);
+      if (Math.cos((rot * Math.PI) / 180) < -1e-9) rot = normalizeAngle(rot + 180);
+      if (rot > 180) rot -= 360;
+      const box = textBoxLocal(s);
+      const local = vec((box.minX + box.maxX) / 2, (box.minY + box.maxY) / 2);
+      const c = m(textCenter(s));
+      const r = (rot * Math.PI) / 180;
+      const off = vec(local.x * Math.cos(r) - local.y * Math.sin(r), local.x * Math.sin(r) + local.y * Math.cos(r));
+      return { ...s, position: sub(c, off), rotationDeg: Math.abs(rot) < 1e-12 ? 0 : rot };
+    }
     case 'rect': {
       // A reflection reverses orientation: the mirrored local +Y axis points "down",
       // so the new base corner is the image of the old top-left corner (c3).

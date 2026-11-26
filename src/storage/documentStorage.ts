@@ -21,6 +21,7 @@ import {
   type FillPattern,
   type FillStyle,
   BY_LAYER,
+  MAX_TEXT_LENGTH,
 } from '../model/types';
 
 /**
@@ -222,6 +223,18 @@ function shape(v: unknown, index: number): Shape {
         radius: num(o, 'radius', where, { gt: 0 }),
         startDeg: num(o, 'startDeg', where),
         sweepDeg,
+      };
+    }
+    case 'text': {
+      const text = str(o, 'text', where);
+      if (text.length > MAX_TEXT_LENGTH) throw err(`${where}.text`, `must be at most ${MAX_TEXT_LENGTH} characters`);
+      return {
+        ...base,
+        kind: 'text',
+        position: point(o.position, `${where}.position`),
+        text,
+        height: num(o, 'height', where, { gt: 0 }),
+        rotationDeg: num(o, 'rotationDeg', where),
       };
     }
     case 'polyline': {

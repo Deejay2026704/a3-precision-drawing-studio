@@ -1,6 +1,6 @@
 import type { Dispatch } from 'react';
 import { boundsHeight, boundsWidth } from '../geometry/bounds';
-import { formatScale, pageLengthToWorld, worldLengthToPage, type DrawingScale } from '../geometry/scale';
+import { formatScale, pageLengthToWorld, scaleFactor, worldLengthToPage, type DrawingScale } from '../geometry/scale';
 import { formatNumber } from '../geometry/units';
 import { vec } from '../geometry/vec';
 import { getDimensions, getShapes, selectionBounds } from '../model/document';
@@ -21,9 +21,9 @@ import {
 import { lineAngle, lineLength, polylineArea, polylineLength, shapeBounds } from '../model/shapes';
 import { LINE_WEIGHTS, SHAPE_KIND_LABELS, TITLE_BLOCK_FIELDS, type Shape, type ShapeId, type ShapeStyle, type TitleBlock } from '../model/types';
 import { todayIso } from '../model/titleBlock';
-import { DEFAULT_FILL, FILL_PATTERN_LABELS, type FillPattern, type FillStyle } from '../model/types';
+import { DEFAULT_FILL, FILL_PATTERN_LABELS, MAX_TEXT_LENGTH, type FillPattern, type FillStyle } from '../model/types';
 import { hatchSegments, isFillable, MIN_HATCH_SPACING_MM } from '../model/fill';
-import { TextField } from './TextField';
+import { TextAreaField, TextField } from './TextField';
 import { NumberField } from './NumberField';
 import type { EditorAction, EditorState } from './state/editorReducer';
 
@@ -50,6 +50,13 @@ export function PropertiesPanel({ state, dispatch, newId }: { state: EditorState
       <h2 className="panel-title">Properties</h2>
       {(tool === 'line' || tool === 'rect' || tool === 'circle' || tool === 'arc' || tool === 'polygon') && (
         <CreateByNumbers key={tool} tool={tool} style={state.drawStyle} dispatch={dispatch} newId={newId} polygonSides={state.polygonSides} />
+      )}
+      {tool === 'text' && shapes.length === 0 && (
+        <section className="panel-section" data-testid="text-settings">
+          <h3>New text</h3>
+          <NumberField label="Height on paper" testId="text-height" min={0.000001} value={state.textHeightMm} onCommit={(mm) => dispatch({ type: 'setTextHeight', mm })} title="Font size of new text on the printed sheet" />
+          <p className="hint">Click on the sheet where the text should start, then type it here.</p>
+        </section>
       )}
       {(tool === 'fillet' || tool === 'chamfer') && (
         <section className="panel-section" data-testid="corner-settings">
@@ -86,7 +93,7 @@ export function PropertiesPanel({ state, dispatch, newId }: { state: EditorState
           <DimensionStyleFields dims={dims} dispatch={dispatch} />
         </>
       )}
-      {shapes.length === 1 && <SingleShapeProperties shape={shapes[0]} scale={doc.scale} update={update} />}
+      {shapes.length === 1 && <SingleShapeProperties key={shapes[0].id} shape={shapes[0]} scale={doc.scale} update={update} justPlaced={tool === 'text'} />}
       {shapes.length > 1 && <MultiProperties state={state} shapes={shapes} update={update} />}
       {shapes.length > 0 && dims.length > 0 && <p className="hint">+ {dims.length} dimension{dims.length === 1 ? '' : 's'} in the selection</p>}
       {shapes.length > 0 && <StyleProperties shapes={shapes} update={update} />}
@@ -132,7 +139,7 @@ function OnPaper({ label, value, scale }: { label: string; value: number; scale:
   );
 }
 
-function SingleShapeProperties({ shape: s, scale, update }: { shape: Shape; scale: DrawingScale; update: Update }) {
+function SingleShapeProperties({ shape: s, scale, update, justPlaced = false }: { shape: Shape; scale: DrawingScale; update: Update; justPlaced?: boolean }) {
   const title = SHAPE_KIND_LABELS[s.kind];
   const u = (next: Shape, what: string) => update([next], `${title}: ${what}`);
   return (
@@ -196,6 +203,19 @@ function SingleShapeProperties({ shape: s, scale, update }: { shape: Shape; scal
         </>
       )}
       {s.kind === 'polyline' && <PolylineFields s={s} u={u} />}
+      {s.kind === 'text' && (
+        <>
+          <TextAreaField key={s.id} label="Text" testId="prop-text" value={s.text} maxLength={MAX_TEXT_LENGTH} autoFocus={justPlaced} onCommit={(v) => (v.trim() ? u({ ...s, text: v }, 'text changed') : undefined)} />
+          <div className="field-grid">
+            <NumberField label="X" testId="prop-x" value={s.position.x} onCommit={(v) => u({ ...s, position: vec(v, s.position.y) }, 'X')} title="Start of the first line's baseline" />
+            <NumberField label="Y" testId="prop-y" value={s.position.y} onCommit={(v) => u({ ...s, position: vec(s.position.x, v) }, 'Y')} title="Start of the first line's baseline" />
+            <NumberField label="Height" testId="prop-text-height" min={0.000001} value={s.height} onCommit={(v) => u({ ...s, height: v }, 'height')} title="Font size in drawing mm" />
+            <NumberField label="On paper" testId="prop-text-paper" min={0.000001} value={worldLengthToPage(s.height, scale)} onCommit={(v) => u({ ...s, height: v / scaleFactor(scale) }, 'height')} title="Font size on the printed sheet (mm)" />
+          </div>
+          <NumberField label="Rotation" testId="prop-rotation" unit="°" value={s.rotationDeg} onCommit={(v) => u({ ...s, rotationDeg: v }, 'rotation')} title="Degrees counter-clockwise about the start point" />
+          <p className="hint">Enter starts a new line; Ctrl+Enter or clicking away applies; Esc cancels.</p>
+        </>
+      )}
     </section>
   );
 }

@@ -4,6 +4,7 @@ import { distanceToArc } from '../geometry/arc';
 import { arcGeom } from './arcs';
 import { pointInPolygon } from '../geometry/hatch';
 import { fillOutline } from './fill';
+import { textCorners } from './text';
 import { polylineSegments, rectCorners, shapeBounds } from './shapes';
 import type { Shape, ShapeId } from './types';
 
@@ -28,6 +29,11 @@ function distanceToOutline(s: Shape, p: Vec2): number {
       return Math.abs(distance(p, s.center) - s.radius);
     case 'arc':
       return distanceToArc(arcGeom(s), p);
+    case 'text': {
+      const c = textCorners(s);
+      if (pointInPolygon(p, c)) return 0; // anywhere on the text box
+      return Math.min(...c.map((a, i) => distanceToSegment(p, a, c[(i + 1) % 4])));
+    }
     case 'polyline': {
       if (s.points.length === 1) return distance(p, s.points[0]);
       let d = Infinity;

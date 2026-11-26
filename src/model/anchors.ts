@@ -46,6 +46,8 @@ export function shapeKeyPoints(s: Shape): KeyedPoint[] {
         { key: 'mid', kind: 'midpoint', point: arcMid(s) },
         { key: 'center', kind: 'center', point: s.center },
       ];
+    case 'text':
+      return [{ key: 'insert', kind: 'endpoint', point: s.position }];
     case 'polyline':
       return [
         ...s.points.map((p, i) => ({ key: `v${i}`, kind: 'endpoint' as const, point: p })),
@@ -87,5 +89,7 @@ export function shapePrimitives(s: Shape): Primitive[] {
       return [{ type: 'arc', c: s.center, r: s.radius, startDeg: s.startDeg, sweepDeg: s.sweepDeg }];
     case 'polyline':
       return segs(s.points, !!s.closed && s.points.length > 2);
+    case 'text':
+      return []; // text is never a cutting edge or boundary
   }
 }

@@ -13,7 +13,9 @@ import { chamferLines, filletLines } from '../../model/curves';
 import type { SnapResult } from '../../model/snap';
 import { createArc, createLine, createPolygon, createPolyline, polylineLength } from '../../model/shapes';
 import { arcThroughPoints } from '../../geometry/arc';
-import type { DimAnchor, Dimension, DimensionStyle, DrawingDocument, Shape, ShapeId, ShapeKind, ShapeStyle } from '../../model/types';
+import { BY_LAYER, type DimAnchor, type Dimension, type DimensionStyle, type DrawingDocument, type Shape, type ShapeId, type ShapeKind, type ShapeStyle, type TextShape } from '../../model/types';
+
+const DEFAULT_TEXT_STYLE: ShapeStyle = { stroke: BY_LAYER, strokeWidthMm: 0.25 };
 import type { ConstraintToolId, DimensionToolId, ModifyToolId } from '../state/editorReducer';
 import { addConstraint } from '../../model/constraints';
 import { shapeKeyPoints } from '../../model/anchors';
@@ -24,7 +26,7 @@ import type { PointRef } from '../../model/types';
  * The canvas feeds it snapped clicks; it returns either "continue" (with a prompt),
  * a document to commit (one undo step), or a refusal message. No DOM, no React.
  */
-export type SessionTool = 'arc' | 'polyline' | 'polygon' | ModifyToolId | DimensionToolId | ConstraintToolId;
+export type SessionTool = 'arc' | 'polyline' | 'polygon' | 'text' | ModifyToolId | DimensionToolId | ConstraintToolId;
 
 export interface ToolSession {
   readonly tool: SessionTool;
@@ -61,6 +63,8 @@ export interface ToolInput {
   readonly filletRadiusMm?: number;
   readonly chamferDistanceMm?: number;
   readonly polygonSides?: number;
+  /** Text tool: font size of new text in DRAWING mm (already converted from paper mm). */
+  readonly textHeight?: number;
 }
 
 export type ToolStep =
@@ -117,6 +121,10 @@ export function toolClick(session: ToolSession, input: ToolInput): ToolStep {
   const canSee = input.canSee ?? (() => true);
 
   switch (session.tool) {
+    case 'text': {
+      const t: TextShape = { id: input.newId(), kind: 'text', position: point, text: 'Text', height: input.textHeight ?? 3.5, rotationDeg: 0, style: input.drawStyle ?? DEFAULT_TEXT_STYLE };
+      return { kind: 'commit', session: reset, doc: { ...doc, shapes: [...doc.shapes, t] }, selection: [t.id], message: 'Text placed – type the text in Properties (Ctrl+Enter or click away to apply)' };
+    }
     case 'polyline': {
       const prev = session.points;
       if (prev.length > 0 && distance(point, prev[prev.length - 1]) < 1e-9) {
@@ -301,6 +309,8 @@ export function toolPreview(session: ToolSession, input: ToolInput): ToolPreview
   const { doc, raw, point, tolerance } = input;
   const previewId = () => '__preview__';
   switch (session.tool) {
+    case 'text':
+      return { ...EMPTY, shapes: [{ id: '__preview__', kind: 'text', position: point, text: 'Text', height: input.textHeight ?? 3.5, rotationDeg: 0, style: input.drawStyle ?? DEFAULT_TEXT_STYLE }] };
     case 'polyline': {
       const p = session.points;
       if (p.length === 0) return EMPTY;

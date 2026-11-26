@@ -5,6 +5,7 @@ import { screenLengthToWorld, screenToWorld, worldToScreen, type ViewTransform }
 import { formatNumber, snapValue } from '../geometry/units';
 import { panBy, zoomAt, type Viewport } from '../geometry/viewport';
 import { distance, sub, vec, type Vec2 } from '../geometry/vec';
+import { pageLengthToWorld } from '../geometry/scale';
 import { getDimensions, getShapes, replaceDimensions, replaceShapes } from '../model/document';
 import {
   applyDimensionGrip,
@@ -77,6 +78,8 @@ function describeShape(s: Shape): string {
       return `R ${fmt(s.radius)}  ∠ ${formatNumber(s.sweepDeg, 2)}°  L ${fmt((s.radius * s.sweepDeg * Math.PI) / 180)} mm`;
     case 'polyline':
       return `${s.points.length} points${s.closed ? ' (closed)' : ''}`;
+    case 'text':
+      return `Text, ${fmt(s.height)} mm high`;
   }
 }
 
@@ -331,6 +334,7 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
     filletRadiusMm: state.filletRadiusMm,
     chamferDistanceMm: state.chamferDistanceMm,
     polygonSides: state.polygonSides,
+    textHeight: pageLengthToWorld(state.textHeightMm, doc.scale),
     canEdit: (sh) => isEditable(doc, sh),
     canSee: (sh) => isVisible(doc, sh),
   });
@@ -717,6 +721,8 @@ function isMeaningful(s: Shape): boolean {
       return s.radius > 1e-9 && s.sweepDeg > 1e-9;
     case 'polyline':
       return s.points.length >= 2;
+    case 'text':
+      return s.text.trim().length > 0 && s.height > 0;
   }
 }
 
@@ -732,6 +738,8 @@ export function describeCreated(s: Shape): string {
       return `Arc created – radius ${formatNumber(s.radius)} mm, ${formatNumber(s.sweepDeg)}°`;
     case 'polyline':
       return `${s.closed ? 'Closed polyline' : 'Polyline'} created – ${s.points.length} points`;
+    case 'text':
+      return 'Text placed – type the text in Properties';
   }
 }
 

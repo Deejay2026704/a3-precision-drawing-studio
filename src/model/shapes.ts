@@ -1,4 +1,5 @@
 import { angleBetweenPoints, rotateVec } from '../geometry/angles';
+import { textCenter, textCorners } from './text';
 import { boundsCenter, boundsOfPoints, type Bounds } from '../geometry/bounds';
 import { add, distance, midpoint, vec, type Vec2 } from '../geometry/vec';
 import { arcBoundsPoints, normalizeArc } from './arcs';
@@ -124,6 +125,8 @@ export function shapeBounds(s: Shape): Bounds {
       return boundsOfPoints(arcBoundsPoints(s));
     case 'polyline':
       return boundsOfPoints(s.points);
+    case 'text':
+      return boundsOfPoints(textCorners(s));
   }
 }
 
@@ -139,5 +142,7 @@ export function shapeCenter(s: Shape): Vec2 {
       return s.center;
     case 'polyline':
       return boundsCenter(shapeBounds(s));
+    case 'text':
+      return textCenter(s);
   }
 }

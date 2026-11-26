@@ -4,6 +4,7 @@ import { layoutDimension } from '../model/dimensions';
 import { layerOf, resolveFill, resolveStroke, visibleDimensions, visibleShapes } from '../model/layers';
 import { fillOutline, HATCH_WEIGHT_MM, hatchSegments } from '../model/fill';
 import { rectCorners } from '../model/shapes';
+import { lineBaselines } from '../model/text';
 import { titleBlockLayout } from '../model/titleBlock';
 import type { ArrowheadStyle, DrawingDocument, Layer } from '../model/types';
 
@@ -90,6 +91,13 @@ export function drawingPrimitives(doc: DrawingDocument): ExportLayer[] {
           case 'polyline':
             prim = { kind: 'polyline', pts: s.points.map(P), closed: !!s.closed, stroke, width };
             break;
+          case 'text':
+            items.push({
+              id: s.id,
+              kind: 'shape',
+              prims: lineBaselines(s).map((l): Prim => ({ kind: 'text', pos: P(l.at), rotationDeg: s.rotationDeg, height: s.height * k, text: l.text, color: stroke, anchor: 'start' })),
+            });
+            continue;
         }
         // Fill/hatch first, so the outline is drawn on top of it.
         const fill = s.style.fill;

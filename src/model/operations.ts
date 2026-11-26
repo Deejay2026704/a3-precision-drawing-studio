@@ -27,6 +27,8 @@ export function moveShape<S extends Shape>(s: S, dx: number, dy: number): S {
       return { ...s, center: add(s.center, d) };
     case 'polyline':
       return { ...s, points: s.points.map((p) => add(p, d)) };
+    case 'text':
+      return { ...s, position: add(s.position, d) };
   }
 }
 
@@ -51,6 +53,8 @@ export function rotateShape<S extends Shape>(s: S, deg: number, pivot: Vec2 = sh
       return normalizeArc({ ...s, center: rotatePoint(s.center, pivot, deg), startDeg: s.startDeg + deg }) as S;
     case 'polyline':
       return { ...s, points: s.points.map((p) => rotatePoint(p, pivot, deg)) };
+    case 'text':
+      return { ...s, position: rotatePoint(s.position, pivot, deg), rotationDeg: normalizeRotation(s.rotationDeg + deg) };
   }
 }
 
@@ -105,6 +109,9 @@ export function scaleShape<S extends Shape>(s: S, sx: number, sy: number, anchor
       return { ...s, start: scalePointAbout(s.start, anchor, sx, sy), end: scalePointAbout(s.end, anchor, sx, sy) };
     case 'polyline':
       return { ...s, points: s.points.map((p) => scalePointAbout(p, anchor, sx, sy)) };
+    case 'text':
+      // Text keeps its proportions and stays readable: uniform size factor, no mirroring.
+      return { ...s, position: scalePointAbout(s.position, anchor, sx, sy), height: s.height * Math.sqrt(Math.abs(sx * sy)) };
     case 'circle': {
       const k = Math.sqrt(Math.abs(sx * sy));
       return { ...s, center: scalePointAbout(s.center, anchor, sx, sy), radius: s.radius * k };

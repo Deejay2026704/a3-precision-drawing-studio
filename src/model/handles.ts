@@ -5,6 +5,7 @@ import { moveShape, resizeBoundsByHandle, resizeRectByHandle, rotateShape, scale
 import { normalizeAngle } from '../geometry/angles';
 import { arcEnd, arcMid, arcStart, normalizeArc } from './arcs';
 import { rectCorners, shapeBounds, shapeCenter } from './shapes';
+import { textCorners } from './text';
 import type { Shape } from './types';
 
 /**
@@ -25,7 +26,7 @@ export interface Handle {
   readonly position: Vec2;
 }
 
-export type FrameMode = 'line' | 'rect' | 'circle' | 'arc' | 'box' | 'multi';
+export type FrameMode = 'line' | 'rect' | 'circle' | 'arc' | 'text' | 'box' | 'multi';
 
 export interface SelectionFrame {
   readonly mode: FrameMode;
@@ -118,6 +119,19 @@ export function getSelectionFrame(shapes: readonly Shape[], rotateOffset: number
             { id: 'radius', position: arcMid(s) },
             { id: 'move', position: s.center },
             { id: 'rotate', position: add(arcMid(s), vec(0, rotateOffset)) },
+          ],
+        };
+      }
+      case 'text': {
+        // Move by the insertion point, rotate about it; size is set in Properties.
+        const c = textCorners(s);
+        return {
+          mode: 'text',
+          outline: c,
+          pivot: s.position,
+          handles: [
+            { id: 'move', position: s.position },
+            { id: 'rotate', position: add(midpoint(c[2], c[3]), rotateVec(vec(0, rotateOffset), s.rotationDeg)) },
           ],
         };
       }
@@ -226,5 +240,7 @@ export function applyHandleDrag(
         return [{ ...s, points: pts }];
       }
       return [resizeBoundsByHandle(s, handle as BoxHandle, p)];
+    case 'text':
+      return [s]; // text has only move/rotate handles (handled above)
   }
 }

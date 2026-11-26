@@ -85,7 +85,24 @@ export interface PolylineShape extends ShapeBase {
   readonly closed?: boolean;
 }
 
-export type Shape = LineShape | RectShape | CircleShape | ArcShape | PolylineShape;
+/**
+ * Text note (Milestone 6). `position` is the left end of the FIRST line's baseline;
+ * further lines (separated by "\n") go downwards in the text's own direction.
+ * `height` is the font size in DRAWING mm (like the geometry; scales with Scale);
+ * the text tool converts the pen's paper height using the drawing scale.
+ * The colour is style.stroke.
+ */
+export interface TextShape extends ShapeBase {
+  readonly kind: 'text';
+  readonly position: Vec2;
+  readonly text: string;
+  readonly height: number;
+  readonly rotationDeg: number;
+}
+
+export const MAX_TEXT_LENGTH = 2000;
+
+export type Shape = LineShape | RectShape | CircleShape | ArcShape | PolylineShape | TextShape;
 export type ShapeKind = Shape['kind'];
 
 // ---------------------------------------------------------------------------
@@ -308,5 +325,6 @@ export const SHAPE_KIND_LABELS: Record<ShapeKind, string> = {
   rect: 'Rectangle',
   circle: 'Circle',
   arc: 'Arc',
-  polyline: 'Freehand polyline',
+  polyline: 'Polyline',
+  text: 'Text',
 };
