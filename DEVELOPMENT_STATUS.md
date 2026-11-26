@@ -1,5 +1,87 @@
 # Development Status
 
+## Milestone 5 — Arcs, fillet/chamfer, new constraints, title block, A4 printing, auto-update (26 Nov 2026)
+
+Built on Milestone 4 without removing or redesigning anything. The project format moved
+to **version 4** additively (arcs, two constraint kinds, `titleBlock`); v1–v3 files are
+migrated on open. App version 0.5.0.
+
+### Arcs — complete
+New object kind (centre, radius, start angle, counter-clockwise sweep). Arc tool (`A`):
+3 clicks (start, a point on the arc, end) with live preview; collinear points are
+refused. Arc by numbers (centre, radius, start, sweep). Properties: centre, radius,
+sweep, start/end angle, arc length. Grips: ends, radius, centre, rotate. Snaps: end,
+midpoint, centre, tangent, intersections (clipped to the sweep). Move/rotate/scale/
+mirror/offset, radius/diameter dimensions, SVG and PDF export as true arcs.
+
+### Trim circles and arcs, fillet, chamfer — complete
+Trim works on circles (a circle crossed at two or more points becomes the arc you did not
+click; the same object, so its dimensions/constraints stay attached) and arcs (trim an
+end or split the middle). The piece to be removed is previewed dashed red. Fillet
+(radius) and Chamfer (distance) between two lines: lines are trimmed/extended to the
+tangent points and an arc/line is added, in one undo step; 0 = sharp corner; parallel
+lines, the same line twice and radii that do not fit are refused with a message. The
+radius/distance is set in Properties while the tool is active.
+
+### Radius and angle constraints — complete
+**Fixed radius** (circle or arc) and **Angle between lines** (0–180°, created at the
+current angle). Both are driving, editable in Properties, shown with markers (R, ∡), and
+solved by the existing solver (arcs take part in tangent/coincident/fixed-position too).
+
+### Title block and print layouts — complete
+Properties (nothing selected) ▸ Title block: frame 10 mm inside the sheet and a
+180 × 40 mm block (title, drawing number, revision, scale and sheet size filled in
+automatically, drawn/checked by, date — today's when first shown — company). Undoable,
+saved in the project, drawn on the canvas, in SVG and in PDF. File ▸ **Export PDF for an
+A4 printer**: *Tiled* = 4 A4 landscape pages at true scale (10 mm overlap, corner marks,
+page labels) or *Fit* = 1 page marked NOT TO SCALE. Ctrl+P is still the A3 export.
+PDF text now uses the full Windows-1252 set (– × ± µ € … no longer print as `?`).
+
+### Auto-update — complete (Windows in-place; macOS notify until signed)
+electron-updater against this repository's GitHub Releases. Check a few seconds after
+start (silent unless there is an update) and File ▸ Check for updates. A non-modal notice
+offers the update; nothing is downloaded without consent. Windows: download (SHA-512
+checked) → *Restart now* (or install on next quit), silent in-place install. macOS:
+Apple only allows in-place updates of Developer-ID-signed apps, so the unsigned build
+offers *Open download page*; once signed, in-place updates switch on automatically.
+The development build and Linux never update. The CI release job now also publishes the
+update feed (`latest.yml`, `latest-mac.yml`, `.blockmap`).
+
+### Code signing — prepared, needs your certificates
+Nothing can be signed without real certificates, so none are faked. The workflow reads
+`WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD` and `MAC_CSC_LINK`/`MAC_CSC_KEY_PASSWORD`/
+`APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` as repository secrets and stays
+unsigned while they are absent (README ▸ Code signing). The signed paths are **untested**.
+
+### Verification
+* Unit tests: **30 files, 315 tests passing**; typecheck clean (renderer + Electron).
+* End-to-end (local, real Electron): M1 64, M2 62, M3 78, M4 31, **M5 53** — all passing;
+  packaged Linux build smoke test 18/18.
+* CI: __CI_RESULT__
+
+### Defects found and fixed during Milestone 5
+1. **Ribbon grew taller** on the Draw tab (new buttons and fields overflowed at 1440 px),
+   moving the drawing area when switching tabs – found by the M2/M3 end-to-end suites.
+   Fillet/chamfer values moved to Properties, buttons tightened, and the ribbon now has a
+   fixed height and scrolls sideways if it ever overflows (CI runner fonts are wider).
+2. Fillet between lines that cross (rather than meet) trimmed the wrong ends.
+3. PDF text printed `–` and `×` as `?` (only Latin-1 was mapped) – full WinAnsi mapping.
+4. File-format reference checks did not know the new constraint kinds.
+5. Test harness: Playwright's `mouse.click` ignores modifier keys (shift-click helper).
+
+### Known limitations (Milestone 5)
+* Installers are still **unsigned** until certificates are added; signed builds,
+  notarisation and macOS in-place updates are not yet exercised.
+* Auto-update has been tested against a local update server in CI, not yet against a
+  real published GitHub Release (that needs a `v*` tag push).
+* Fillet/chamfer work between two lines only (not line–arc or arc–arc); no ellipses or
+  splines; trim of rectangles and freehand polylines is still refused.
+* Title block has a fixed layout; A4 tiling is fixed at 2 × 2 landscape pages.
+* PDF text: characters outside Windows-1252 still print as `?`.
+* Not yet tested by a person on physical Windows/macOS hardware.
+
+---
+
 ## Milestone 4 — Installers, PDF export, autosave: **complete** (26 Nov 2026)
 
 ### PDF export — complete
@@ -309,8 +391,9 @@ Windows packaging (electron-builder NSIS), snapping to object points, a coordina
 command line (e.g. `@100<30`), dimensions, layers, print or PDF export at true scale,
 and filled shapes with inside hit-testing.
 
-## Recommended Milestone 5
+## Recommended Milestone 6
 
-Code signing + notarisation and auto-update; arcs (enabling trimming of circles,
-fillet/chamfer and arc constraints); radius and two-line angle constraints; multi-page /
-title-block print layouts.
+Signed and notarised releases (once certificates exist) with a first real `v0.5.0`
+release to exercise auto-update end to end; fillet/chamfer between lines and arcs;
+polylines/polygons that can be trimmed and filled (hatching); text/notes on the
+drawing; configurable title block and print scaling to other paper sizes.

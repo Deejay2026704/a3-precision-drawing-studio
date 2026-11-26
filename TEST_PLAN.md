@@ -1,4 +1,4 @@
-# Test Plan: Milestones 1–4
+# Test Plan: Milestones 1–5
 
 There are three levels of testing:
 
@@ -65,6 +65,19 @@ Last full result: **26 files, 264 tests, all passing** (incl. heartbeat-based or
 | PDF | `tests/exportPdf.test.ts` | A3 MediaBox; every xref offset and the stream length; true-scale coordinates at 1:2; hidden layers excluded (objects, dimensions, layer); visible layers as OCGs with safe Unicode names; Helvetica/WinAnsi (⌀→Ø); "By layer" colour; Bézier circle error < 1e-4 mm; deterministic; **poppler** reads page size, title and text |
 | Autosave | `tests/autosave.test.ts` | record round trip; damaged/foreign/incomplete records and invalid projects rejected; scheduling rule (disabled, clean, unchanged, mid-drag, too soon); store writes/clears only its own file, never touches other files; orphans = dead sessions only, newest first; path-escape refused; recovered drawings open modified and become clean only on save |
 | SVG | `tests/exportSvg.test.ts` | unchanged M3 tests pass on the new shared primitives |
+
+### Milestone 5 unit tests (added)
+
+Last full result: **30 files, 315 tests, all passing**.
+
+| Area | File | What is verified |
+| --- | --- | --- |
+| Arcs | `tests/arcs.test.ts` | 3-point arcs (and collinear refusal), angle-on-arc with wrap-around, nearest point / distance, bounds, clipped intersections; move/rotate/scale/mirror/offset of arcs; grips (start, end, radius); snaps (end, mid, centre, tangent, intersections clipped to the sweep); radial dimensions on arcs; v4 round trip |
+| Trim / fillet / chamfer | `tests/curves.test.ts`, `tests/undoRedo.test.ts` | circle → arc (needs 2 cuts), arc trimmed at either end or split in two, exact preview; fillet tangent points and centre exact at 90° and other angles, lines that stop short of the corner, crossing lines keep the picked sides; radius 0 = sharp corner; parallel / same line / too-large and negative radius refused; chamfer equal and unequal distances; one undo step each |
+| Constraints | `tests/constraints.test.ts` (M5 block) | fixed radius on circles and arcs (centres stay put); angle between lines created at the current angle and edited exactly; conflicting angle refused; line tangent to an arc, coincident with an arc end, pinned arc centre; file round trip |
+| Title block / print layouts | `tests/titleBlockPrint.test.ts` | frame and block inside the sheet margins; auto scale and sheet size; long text truncated with "…"; hidden ⇒ nothing exported; SVG group; A4 tiles cover the sheet with overlap and at true scale; fit layout scale factor; Windows-1252 text (– — × ± µ € …; other characters still print as `?`); **poppler** page counts, sizes and text |
+| Updates | `tests/updatePolicy.test.ts` | per-platform mode (Windows install, unsigned macOS notify, others/dev none); release-page URL only for this repository; only http(s) update servers; short error messages |
+| Storage | `tests/storage.test.ts`, `tests/titleBlockPrint.test.ts`, `tests/arcs.test.ts` | the existing v1–v3 migration tests now end at v4; older files get a hidden title block; invalid arc sweeps and title-block text rejected |
 
 ## 2. End-to-end smoke test: `npm run e2e`
 
@@ -189,6 +202,31 @@ the new session, first Save asks (Cancel leaves the original byte-identical, *Sa
 original* writes it); damaged backup reported and deleted only on request; a `.a3d`
 passed on the command line opens at start-up; no copies left after normal exits.
 
+### Milestone 5 end-to-end suite: `tests-e2e/milestone5.mjs` (development build)
+
+Last local result: **53 checks passed, 0 failed** (with M1 64, M2 62, M3 78, M4 31).
+The drawing area never moves when switching ribbon tabs (also on a 1000 px window, where
+the ribbon scrolls); 3-point arc exact (centre, radius, sweep), collinear points refused,
+arc by numbers and its length in Properties; trim preview, trimming a circle to an arc,
+undo/redo; fillet R10 exact centre and tangent points, one undo, chamfer 5, same line
+twice refused; angle constraint recorded as 90° then driven to exactly 60°; fixed radius
+on an arc; title block on/off, today's date, typed fields on the sheet, automatic scale
+and sheet size, Escape reverts, undo; Ctrl+P one A3 page; A4 tiled = 4 A4 landscape
+pages each labelled "Page i of 4", A4 fit = 1 page marked NOT TO SCALE, Cancel writes
+nothing (checked with poppler); SVG has the title block; Save As format 4 and reopen
+identical; Check for updates in the development build explains it only works installed.
+
+### Installed-app update test: `tests-e2e/update-e2e.mjs` (CI, Windows and macOS)
+
+CI builds a second, newer version (99.0.0) of the app, serves it from a local HTTP server
+and points the **installed** app at it (`A3_UPDATE_URL`). Checks: the start-up check offers
+the new version; nothing is downloaded before consent; *Later* hides the notice and
+File ▸ Check for updates brings it back. **Windows:** *Download and install* downloads it,
+*Restart now* closes the app, the silent installer replaces the installed program
+(its version resource becomes 99.0.0) and the relaunched app reports 99.0.0.
+**macOS (unsigned):** only *Open download page* is offered, and it opens this project's
+release page for that version.
+
 ### Packaged-app smoke test: `tests-e2e/packaged-smoke.mjs` (any OS)
 
 18 checks against an installed/packaged app with a temporary profile: runs from packaged
@@ -203,7 +241,10 @@ installer 18/18 (then silently uninstalled); macOS arm64 installed from the DMG 
 Linux: typecheck, unit tests, all E2E suites under Xvfb → Windows: build NSIS (x64, arm64),
 silent install, packaged smoke test on the installed app, silent uninstall → macOS: build
 DMG + ZIP (arm64, x64), `hdiutil verify`, install from DMG, `codesign --verify`, check the
-`.a3d` document type, packaged smoke test. Installers uploaded as artifacts.
+`.a3d` document type, packaged smoke test. Both then run the installed-app update test
+(Windows before uninstalling). Installers and the update feed (`latest*.yml`,
+`.blockmap`) are uploaded as artifacts and, for `v*` tags, to a GitHub Release.
+Signing secrets are used when present (README ▸ Code signing).
 
 ### Additional one-off checks performed
 
@@ -242,3 +283,7 @@ Run `npm install` and then `npm run dev`, and check each item:
 - [ ] (M4) Export PDF, print at 100 % / Actual size, measure a known line with a ruler
 - [ ] (M4) Draw, wait 2 minutes, end the process in Task Manager / Activity Monitor, restart: Recover
 - [ ] (M4) Uninstall from Settings ▸ Apps (Windows) / move to Bin (macOS)
+- [ ] (M5) Draw an arc by 3 clicks and by numbers; trim a circle crossed by a line; fillet and chamfer a corner
+- [ ] (M5) Add Fixed radius to an arc and Angle between two lines; change the values
+- [ ] (M5) Turn on the title block, fill it in; export the A3 PDF and the A4 tiled PDF; print a tile at 100 % and measure
+- [ ] (M5) After a newer release is published: the installed app offers it; Windows installs it on restart
