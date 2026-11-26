@@ -14,6 +14,9 @@ const FILE_FILTERS = [
 let mainWindow: BrowserWindow | null = null;
 let documentDirty = false;
 
+/** Lifecycle diagnostics on stderr (visible when launched from a terminal or a test harness). */
+const log = (msg: string) => process.stderr.write(`[a3] ${msg}\n`);
+
 // Tests (and portable setups) can redirect all app data, including autosave, away from the real profile.
 if (process.env.A3_USER_DATA) app.setPath('userData', process.env.A3_USER_DATA);
 
@@ -33,6 +36,7 @@ function requestOpen(filePath: string) {
 
 // One window: a second launch (e.g. double-clicking another drawing) hands its file to this instance.
 if (!process.env.A3_ALLOW_MULTIPLE && !app.requestSingleInstanceLock()) {
+  log('another instance holds the single-instance lock – handing over and quitting');
   app.quit();
 } else {
   app.on('second-instance', (_e, argv) => {
@@ -70,6 +74,9 @@ function createWindow(): void {
   Menu.setApplicationMenu(null);
 
   mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.webContents.on('render-process-gone', (_e, d) => log(`renderer gone: ${d.reason} (exit ${d.exitCode})`));
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => log(`load failed: ${code} ${desc} ${url}`));
+  mainWindow.webContents.on('preload-error', (_e, p, err) => log(`preload error in ${p}: ${err.message}`));
 
   mainWindow.on('close', (event) => {
     if (!documentDirty || !mainWindow) return;
@@ -85,6 +92,7 @@ function createWindow(): void {
     if (choice !== 0) event.preventDefault();
   });
   mainWindow.on('closed', () => {
+    log('main window closed');
     mainWindow = null;
   });
 
@@ -177,7 +185,12 @@ ipcMain.on('doc:dirty', (_e, dirty: boolean) => {
 
 ipcMain.on('app:quit', () => mainWindow?.close());
 
+app.on('child-process-gone', (_e, d) => log(`child process gone: ${d.type} ${d.reason} (exit ${d.exitCode})`));
+app.on('quit', (_e, code) => log(`quit (exit code ${code})`));
+process.on('uncaughtException', (err) => log(`uncaught exception: ${err.stack ?? err}`));
+
 app.whenReady().then(() => {
+  log(`ready – version ${app.getVersion()}, userData ${app.getPath('userData')}`);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
