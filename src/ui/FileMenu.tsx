@@ -10,6 +10,7 @@ export interface FileCommands {
   exportPdf(): void | Promise<void>;
   exportPdfA4(): void | Promise<void>;
   toggleAutosave(): void;
+  checkForUpdates(): void | Promise<void>;
   readonly autosaveLabel: string;
   exit(): void;
 }
@@ -65,6 +66,8 @@ export function FileMenu({ commands }: { commands: FileCommands }) {
           {item('Export SVG…', '', commands.exportSvg, 'menu-export-svg')}
           <div className="menu-sep" />
           {item(commands.autosaveLabel, '', commands.toggleAutosave, 'menu-autosave')}
+          <div className="menu-sep" />
+          {item('Check for updates…', '', commands.checkForUpdates, 'menu-check-updates')}
           <div className="menu-sep" />
           {item('Exit', 'Alt+F4', commands.exit, 'menu-exit')}
         </div>

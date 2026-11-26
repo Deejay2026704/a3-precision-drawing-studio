@@ -49,6 +49,17 @@ export function PropertiesPanel({ state, dispatch, newId }: { state: EditorState
       {(tool === 'line' || tool === 'rect' || tool === 'circle' || tool === 'arc') && (
         <CreateByNumbers key={tool} tool={tool} style={state.drawStyle} dispatch={dispatch} newId={newId} />
       )}
+      {(tool === 'fillet' || tool === 'chamfer') && (
+        <section className="panel-section" data-testid="corner-settings">
+          <h3>{tool === 'fillet' ? 'Fillet' : 'Chamfer'}</h3>
+          {tool === 'fillet' ? (
+            <NumberField label="Radius" testId="fillet-radius" min={0} value={state.filletRadiusMm} onCommit={(mm) => dispatch({ type: 'setFilletRadius', mm })} />
+          ) : (
+            <NumberField label="Distance" testId="chamfer-distance" min={0} value={state.chamferDistanceMm} onCommit={(mm) => dispatch({ type: 'setChamferDistance', mm })} />
+          )}
+          <p className="hint">Drawing millimetres. 0 makes a sharp corner. Click the two lines on the parts to keep.</p>
+        </section>
+      )}
       {shapes.length === 0 && dims.length === 0 && cons.length === 0 && (
         <>
           <DocumentProperties state={state} />

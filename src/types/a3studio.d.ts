@@ -26,6 +26,27 @@ export interface AppConfig {
   autosaveIntervalMs: number | null;
 }
 
+export type UpdateMode = 'install' | 'notify' | 'unsupported';
+/** Mirrors electron/updatePolicy.ts UpdateStatus (+ whether the user asked for the check). */
+export type UpdateStatus = { manual?: boolean; mode: UpdateMode } & (
+  | { state: 'idle' | 'checking' }
+  | { state: 'unsupported'; message: string }
+  | { state: 'not-available'; current: string }
+  | { state: 'available'; current: string; version: string; releaseUrl: string }
+  | { state: 'downloading'; version: string; percent: number }
+  | { state: 'downloaded'; version: string }
+  | { state: 'error'; message: string }
+);
+
+export interface UpdatesApi {
+  check(manual: boolean): Promise<UpdateStatus>;
+  status(): Promise<UpdateStatus>;
+  download(): Promise<UpdateStatus>;
+  install(): Promise<boolean>;
+  openReleasePage(): Promise<void>;
+  onStatus(cb: (s: UpdateStatus) => void): () => void;
+}
+
 export interface A3StudioApi {
   readonly platform: string;
   openDrawing(): Promise<OpenFileResult | null>;
@@ -38,6 +59,7 @@ export interface A3StudioApi {
   onOpenFile(cb: (filePath: string) => void): () => void;
   config(): Promise<AppConfig>;
   autosave: AutosaveApi;
+  updates: UpdatesApi;
   setDirty(dirty: boolean): void;
   quit(): void;
 }

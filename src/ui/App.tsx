@@ -20,6 +20,7 @@ import { FileMenu, type FileCommands } from './FileMenu';
 import { PropertiesPanel } from './PropertiesPanel';
 import { Ribbon, type EditCommands, type RibbonTab, type ViewCommands } from './Ribbon';
 import { StatusBar } from './StatusBar';
+import { UpdateBanner, useUpdates } from './UpdateBanner';
 import { createInitialState, editorReducer, isDirty, projectSettingsOf, type ToolId } from './state/editorReducer';
 
 export const APP_TITLE = 'A3 Precision Drawing Studio';
@@ -277,6 +278,8 @@ export function App() {
 
   // ---- file commands ----
   const [dialog, ask] = useDialog();
+  const showMessage = useCallback((message: string) => dispatch({ type: 'setMessage', message }), []);
+  const updates = useUpdates(showMessage);
 
   /** Serialised project: document + active layer + display preferences. */
   const projectText = () => serializeProject(stateRef.current.doc, projectSettingsOf(stateRef.current));
@@ -454,6 +457,7 @@ export function App() {
     saveAs: async () => {
       await saveAs();
     },
+    checkForUpdates: () => updates.check(),
     exportPdfA4: async () => {
       const a = await ask({
         title: 'Export PDF for an A4 printer',
@@ -606,6 +610,7 @@ export function App() {
         </div>
       </main>
       {dialog}
+      <UpdateBanner status={updates.status} dismissed={updates.dismissed} onDismiss={updates.setDismissed} />
       <StatusBar state={state} dispatch={dispatch} cursor={cursor} feedback={feedback} zoom={viewport.zoom} view={view} autosave={autosaveOn ? autosaveInfo || 'Autosave on' : 'Autosave off'} />
     </div>
   );

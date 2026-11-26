@@ -23,6 +23,18 @@ contextBridge.exposeInMainWorld('a3Studio', {
     read: (id: string) => ipcRenderer.invoke('autosave:read', id),
     remove: (id: string) => ipcRenderer.invoke('autosave:remove', id),
   },
+  updates: {
+    check: (manual: boolean) => ipcRenderer.invoke('update:check', manual),
+    status: () => ipcRenderer.invoke('update:status'),
+    download: () => ipcRenderer.invoke('update:download'),
+    install: () => ipcRenderer.invoke('update:install'),
+    openReleasePage: () => ipcRenderer.invoke('update:openReleasePage'),
+    onStatus: (cb: (s: unknown) => void) => {
+      const h = (_e: unknown, s: unknown) => cb(s);
+      ipcRenderer.on('update:status', h);
+      return () => ipcRenderer.removeListener('update:status', h);
+    },
+  },
   setDirty: (dirty: boolean) => ipcRenderer.send('doc:dirty', dirty),
   quit: () => ipcRenderer.send('app:quit'),
 });

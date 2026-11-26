@@ -33,6 +33,10 @@ module.exports = {
     },
   ],
 
+  // Auto-update feed (electron-updater): GitHub Releases of this repository. Builds use
+  // --publish never; the CI release job uploads the installers plus latest*.yml / .blockmap.
+  publish: [{ provider: 'github', owner: 'Deejay2026704', repo: 'a3-precision-drawing-studio', releaseType: 'release' }],
+
   win: {
     target: [{ target: 'nsis', arch: ['x64', 'arm64'] }],
     icon: 'build/icon.png',

@@ -169,17 +169,11 @@ export function Ribbon({ tab, state, dispatch, zoom, view, edit, constrain }: Pr
             {tool('extend', 'extend', 'Extend', 'E', 'click near a line end to extend it to the next object')}
             {tool('offset', 'offset', 'Offset', 'O', 'click an object, then the side: creates a parallel copy')}
             {tool('mirror', 'mirror', 'Mirror', 'M', 'select objects, then click two points on the mirror line')}
-            {tool('fillet', 'fillet', 'Fillet', '', 'round the corner between two lines with an arc (radius below; 0 = sharp corner)')}
-            {tool('chamfer', 'chamfer', 'Chamfer', '', 'cut the corner between two lines (distance below; 0 = sharp corner)')}
+            {tool('fillet', 'fillet', 'Fillet', '', 'round the corner between two lines with an arc (radius in Properties; 0 = sharp corner)')}
+            {tool('chamfer', 'chamfer', 'Chamfer', '', 'cut the corner between two lines (distance in Properties; 0 = sharp corner)')}
             <div className="ribbon-stack">
               <div className="ribbon-number" title="Offset distance in drawing millimetres">
                 <NumberField label="Offset" testId="offset-distance" min={0.000001} value={state.offsetDistanceMm} onCommit={(mm) => dispatch({ type: 'setOffsetDistance', mm })} />
-              </div>
-              <div className="ribbon-number" title="Fillet radius in drawing millimetres (0 = sharp corner)">
-                <NumberField label="Fillet R" testId="fillet-radius" min={0} value={state.filletRadiusMm} onCommit={(mm) => dispatch({ type: 'setFilletRadius', mm })} />
-              </div>
-              <div className="ribbon-number" title="Chamfer distance along each line, drawing millimetres">
-                <NumberField label="Chamfer" testId="chamfer-distance" min={0} value={state.chamferDistanceMm} onCommit={(mm) => dispatch({ type: 'setChamferDistance', mm })} />
               </div>
               <label className="ribbon-field" title="Mirror makes a copy (on) or moves the originals (off)">
                 <input type="checkbox" data-testid="mirror-keep" checked={state.mirrorKeepSource} onChange={(e) => dispatch({ type: 'setMirrorKeepSource', keep: e.target.checked })} />

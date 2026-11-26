@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { writeFileAtomic } from './atomicWrite';
 import { AutosaveStore, DEFAULT_STALE_MS, sessionId } from './autosaveStore';
+import { setupUpdater } from './updater';
 import { appendFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 
 const APP_TITLE = 'A3 Precision Drawing Studio';
@@ -216,6 +217,7 @@ app.whenReady().then(() => {
   beat();
   setInterval(beat, Math.max(1000, Math.min(10_000, STALE_MS / 3))).unref();
   createWindow();
+  setupUpdater(() => mainWindow, log);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
