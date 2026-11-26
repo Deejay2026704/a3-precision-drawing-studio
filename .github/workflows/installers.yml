@@ -114,9 +114,11 @@ jobs:
           if-no-files-found: warn
 
   macos:
-    name: macOS installer
+    name: macOS installer (built on Intel)
     needs: test
-    runs-on: macos-latest
+    # Intel Mac runner: GitHub has had long arm64 (Apple Silicon) runner shortages. It builds the
+    # arm64 AND x64 installers; the x64 one is installed and smoke-tested here.
+    runs-on: macos-15-intel
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
