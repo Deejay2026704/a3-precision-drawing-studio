@@ -59,6 +59,15 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+function Small({ icon, label, onClick, active, testId, title }: { icon: string; label: string; onClick: () => void; active?: boolean; testId?: string; title?: string }) {
+  return (
+    <button className={`ribbon-small${active ? ' active' : ''}`} onClick={onClick} data-testid={testId} title={title ?? label} aria-pressed={active} data-active={active ? 'true' : undefined}>
+      <Icon name={icon} size={16} />
+      <span>{label}</span>
+    </button>
+  );
+}
+
 function Big({ icon, glyph, label, onClick, active, disabled, testId, title }: { icon: string; glyph?: string; label: string; onClick: () => void; active?: boolean; disabled?: boolean; testId?: string; title?: string }) {
   return (
     <button className={`ribbon-btn${active ? ' active' : ''}`} onClick={onClick} disabled={disabled} data-testid={testId} title={title ?? label} aria-pressed={active} data-active={active ? 'true' : undefined}>
@@ -94,6 +103,16 @@ interface Props {
 export function Ribbon({ tab, state, dispatch, zoom, view, edit, constrain }: Props) {
   const tool = (t: ToolId, icon: string, label: string, key: string, tip = '') => (
     <Big
+      icon={icon}
+      label={label}
+      active={state.tool === t}
+      onClick={() => dispatch({ type: 'setTool', tool: t })}
+      testId={`tool-${t}`}
+      title={`${label}${key ? ` (${key})` : ''}${tip ? ` – ${tip}` : ''}`}
+    />
+  );
+  const small = (t: ToolId, icon: string, label: string, key: string, tip = '') => (
+    <Small
       icon={icon}
       label={label}
       active={state.tool === t}
@@ -138,7 +157,11 @@ export function Ribbon({ tab, state, dispatch, zoom, view, edit, constrain }: Pr
             {tool('rect', 'rect', 'Rectangle', 'R')}
             {tool('circle', 'circle', 'Circle', 'C')}
             {tool('arc', 'arc', 'Arc', 'A', 'click start, a point on the arc, end – or create by numbers')}
-            {tool('freehand', 'freehand', 'Freehand', 'F')}
+            <div className="ribbon-stack ribbon-smalls">
+              {small('polyline', 'polyline', 'Polyline', 'P', 'click points; Enter or double-click to finish; click the first point to close')}
+              {small('polygon', 'polygon', 'Polygon', 'G', 'regular polygon: click the centre, then a corner (sides in Properties)')}
+              {small('freehand', 'freehand', 'Freehand', 'F')}
+            </div>
           </Group>
           <Group title="Pen (new objects)">
             <div className="ribbon-stack">
@@ -214,6 +237,9 @@ export function Ribbon({ tab, state, dispatch, zoom, view, edit, constrain }: Pr
       )}
       {tab === 'annotate' && (
         <>
+          <Group title="Text">
+            {tool('text', 'text', 'Text', 'X', 'click where the text starts, then type it in Properties')}
+          </Group>
           <Group title="Dimensions">
             {tool('dim-aligned', 'dimAligned', 'Aligned', 'D', 'true distance between two points')}
             {tool('dim-horizontal', 'dimHorizontal', 'Horizontal', '', 'X distance between two points')}

@@ -18,7 +18,7 @@ import {
   setRectRotation,
   setRectSize,
 } from '../model/operations';
-import { lineAngle, lineLength, polylineLength, shapeBounds } from '../model/shapes';
+import { lineAngle, lineLength, polylineArea, polylineLength, shapeBounds } from '../model/shapes';
 import { LINE_WEIGHTS, SHAPE_KIND_LABELS, TITLE_BLOCK_FIELDS, type Shape, type ShapeId, type ShapeStyle, type TitleBlock } from '../model/types';
 import { todayIso } from '../model/titleBlock';
 import { TextField } from './TextField';
@@ -46,8 +46,8 @@ export function PropertiesPanel({ state, dispatch, newId }: { state: EditorState
   return (
     <aside className="properties" data-testid="properties-panel">
       <h2 className="panel-title">Properties</h2>
-      {(tool === 'line' || tool === 'rect' || tool === 'circle' || tool === 'arc') && (
-        <CreateByNumbers key={tool} tool={tool} style={state.drawStyle} dispatch={dispatch} newId={newId} />
+      {(tool === 'line' || tool === 'rect' || tool === 'circle' || tool === 'arc' || tool === 'polygon') && (
+        <CreateByNumbers key={tool} tool={tool} style={state.drawStyle} dispatch={dispatch} newId={newId} polygonSides={state.polygonSides} />
       )}
       {(tool === 'fillet' || tool === 'chamfer') && (
         <section className="panel-section" data-testid="corner-settings">
@@ -208,11 +208,31 @@ function PolylineFields({ s, u }: { s: Extract<Shape, { kind: 'polyline' }>; u: 
         <NumberField label="Height" testId="prop-height" min={0} value={boundsHeight(b)} onCommit={(v) => u(setBoundsSize(s, boundsWidth(b), v), 'height')} />
       </div>
       <RotateBy onRotate={(deg) => u(rotateShape(s, deg), `rotated ${formatNumber(deg)}°`)} />
+      <label className="field" title="Closed: the last point joins back to the first (a polygon that can be filled or hatched)">
+        <span className="field-label">Closed</span>
+        <input
+          type="checkbox"
+          data-testid="prop-closed"
+          checked={!!s.closed}
+          disabled={!s.closed && s.points.length < 3}
+          onChange={(e) => {
+            const { closed: _c, ...open } = s;
+            void _c;
+            u(e.target.checked ? { ...s, closed: true } : open, e.target.checked ? 'closed' : 'opened');
+          }}
+        />
+      </label>
       <dl className="info">
         <dt>Points</dt>
         <dd>{s.points.length}</dd>
-        <dt>Path length</dt>
-        <dd>{formatNumber(polylineLength(s))} mm</dd>
+        <dt>{s.closed ? 'Perimeter' : 'Path length'}</dt>
+        <dd data-testid="prop-path-length">{formatNumber(polylineLength(s))} mm</dd>
+        {s.closed && (
+          <>
+            <dt>Area</dt>
+            <dd data-testid="prop-area">{formatNumber(polylineArea(s))} mm²</dd>
+          </>
+        )}
       </dl>
     </>
   );

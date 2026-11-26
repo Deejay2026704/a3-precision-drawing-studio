@@ -87,7 +87,7 @@ export function drawingPrimitives(doc: DrawingDocument): ExportLayer[] {
             prim = { kind: 'arc', c: P(s.center), r: s.radius * k, startDeg: s.startDeg, sweepDeg: s.sweepDeg, stroke, width };
             break;
           case 'polyline':
-            prim = { kind: 'polyline', pts: s.points.map(P), closed: false, stroke, width };
+            prim = { kind: 'polyline', pts: s.points.map(P), closed: !!s.closed, stroke, width };
             break;
         }
         items.push({ id: s.id, kind: 'shape', prims: [prim] });

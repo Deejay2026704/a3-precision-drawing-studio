@@ -208,3 +208,9 @@ button, select, input { font: inherit; color: inherit; }
 .update-banner button { padding: 3px 10px; font-size: 12px; border: 1px solid #c6c9ce; background: #f6f7f8; border-radius: 3px; cursor: pointer; }
 .update-banner button.primary { background: #1a73e8; border-color: #1a73e8; color: #fff; }
 .sheet-text { font-family: Arial, sans-serif; }
+
+/* Small stacked ribbon buttons (less frequent tools) */
+.ribbon-smalls { gap: 1px; }
+.ribbon-small { display: flex; align-items: center; gap: 4px; padding: 1px 6px 1px 3px; border: 1px solid transparent; border-radius: 3px; background: none; cursor: pointer; font-size: 12px; white-space: nowrap; }
+.ribbon-small:hover { background: #eef3fd; border-color: #c6dafc; }
+.ribbon-small.active { background: var(--accent-soft); border-color: #8ab4f8; }

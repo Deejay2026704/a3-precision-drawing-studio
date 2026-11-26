@@ -5,6 +5,7 @@ import { shapePrimitives } from './anchors';
 import { retargetAnchors } from './dimensions';
 import { arcEnd, normalizeArc } from './arcs';
 import { trimCurve, trimCurvePreview } from './curves';
+import { trimPolyline, trimPolylinePreview } from './polylineTrim';
 import { rectCorners } from './shapes';
 import type { DrawingDocument, LineShape, PolylineShape, RectShape, Shape, ShapeId } from './types';
 
@@ -40,7 +41,7 @@ function asLine(doc: DrawingDocument, id: ShapeId, op: string): LineShape | stri
   if (!s) return 'Object not found';
   if (s.kind !== 'line') {
     return op === 'Trim'
-      ? 'Trim works on lines, circles and arcs. Rectangles and polylines act as cutting edges but cannot be trimmed.'
+      ? 'Trim works on lines, circles, arcs and polylines. Rectangles act as cutting edges but cannot be trimmed.'
       : 'Extend works on lines. Other objects act as boundaries but cannot be extended.';
   }
   if (distance(s.start, s.end) < MIN_LEN) return `Cannot ${op.toLowerCase()} a zero-length line`;
@@ -105,6 +106,10 @@ export function trimLine(doc: DrawingDocument, lineId: ShapeId, pick: Vec2, newI
 export function trimShape(doc: DrawingDocument, id: ShapeId, pick: Vec2, newId: () => ShapeId): EditResult {
   const s = doc.shapes.find((x) => x.id === id);
   if (s && (s.kind === 'circle' || s.kind === 'arc')) return trimCurve(doc, id, pick, newId);
+  if (s && s.kind === 'polyline') {
+    const r = trimPolyline(doc, id, pick, newId);
+    return r.ok ? { ok: true, doc: r.doc, selection: r.selection, message: r.message } : fail(r.message);
+  }
   return trimLine(doc, id, pick, newId);
 }
 
@@ -113,6 +118,7 @@ export function trimPreviewShape(doc: DrawingDocument, id: ShapeId, pick: Vec2):
   const s = doc.shapes.find((x) => x.id === id);
   if (!s) return null;
   if (s.kind === 'circle' || s.kind === 'arc') return trimCurvePreview(doc, id, pick);
+  if (s.kind === 'polyline') return trimPolylinePreview(doc, id, pick);
   const seg = trimPreview(doc, id, pick);
   return seg ? { ...s, id: '__trim__', kind: 'line', start: seg[0], end: seg[1] } as Shape : null;
 }
@@ -153,7 +159,12 @@ const leftNormal = (a: Vec2, b: Vec2): Vec2 => {
 };
 
 function offsetPolyline(p: PolylineShape, dist: number, side: Vec2, id: ShapeId): PolylineShape | string {
-  const pts = p.points.filter((q, i) => i === 0 || distance(q, p.points[i - 1]) > MIN_LEN);
+  let pts = p.points.filter((q, i) => i === 0 || distance(q, p.points[i - 1]) > MIN_LEN);
+  const closed = !!p.closed && pts.length > 2;
+  if (closed) {
+    if (distance(pts[0], pts[pts.length - 1]) <= MIN_LEN) pts = pts.slice(0, -1);
+    pts = [...pts, pts[0]]; // treat as open with the closing segment, then re-join the ends
+  }
   if (pts.length < 2) return 'Cannot offset a polyline with zero length';
   // Side: sign of the side point relative to the nearest segment.
   let best = 0;
@@ -183,6 +194,13 @@ function offsetPolyline(p: PolylineShape, dist: number, side: Vec2, id: ShapeId)
     else out.push(hit.point);
   }
   out.push(segs[segs.length - 1][1]);
+  if (closed) {
+    // Mitre the corner at the first vertex (between the closing segment and the first one).
+    const last = segs[segs.length - 1];
+    const hit = lineLineIntersection(last[0], last[1], segs[0][0], segs[0][1]);
+    const corner = hit && distance(hit.point, pts[0]) <= 4 * dist ? [hit.point] : [last[1], segs[0][0]];
+    return { ...p, id, points: [...corner, ...out.slice(1, -1)], closed: true };
+  }
   return { ...p, id, points: out };
 }
 

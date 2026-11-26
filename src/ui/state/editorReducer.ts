@@ -26,7 +26,7 @@ import {
 export type DimensionToolId = 'dim-aligned' | 'dim-horizontal' | 'dim-vertical' | 'dim-angular' | 'dim-radius' | 'dim-diameter';
 export type ModifyToolId = 'trim' | 'extend' | 'offset' | 'mirror' | 'fillet' | 'chamfer';
 export type ConstraintToolId = 'con-coincident' | 'con-fixed-position';
-export type ToolId = 'select' | 'line' | 'rect' | 'circle' | 'arc' | 'freehand' | ModifyToolId | DimensionToolId | ConstraintToolId;
+export type ToolId = 'select' | 'line' | 'rect' | 'circle' | 'arc' | 'freehand' | 'polyline' | 'polygon' | 'text' | ModifyToolId | DimensionToolId | ConstraintToolId;
 
 export const TOOL_LABELS: Record<ToolId, string> = {
   select: 'Select',
@@ -35,6 +35,9 @@ export const TOOL_LABELS: Record<ToolId, string> = {
   circle: 'Circle',
   arc: 'Arc',
   freehand: 'Freehand',
+  polyline: 'Polyline',
+  polygon: 'Polygon',
+  text: 'Text',
   trim: 'Trim',
   extend: 'Extend',
   offset: 'Offset',
@@ -59,7 +62,10 @@ export const TOOL_PROMPTS: Record<ToolId, string> = {
   circle: 'Circle: drag, or click the centre',
   arc: 'Arc: click the start point, then a point on the arc, then the end point',
   freehand: 'Freehand: drag to draw',
-  trim: 'Trim: click the part of a line, circle or arc to remove',
+  polyline: 'Polyline: click the first point',
+  polygon: 'Polygon: click the centre (number of sides in Properties)',
+  text: 'Text: click where the text starts (bottom-left of the first line)',
+  trim: 'Trim: click the part of a line, circle, arc or polyline to remove',
   extend: 'Extend: click a line near the end to extend',
   offset: 'Offset: click the object to offset',
   mirror: 'Mirror: select objects (Shift+click), then click two points on the mirror line',
@@ -126,6 +132,10 @@ export interface EditorState {
   /** Fillet tool radius and chamfer tool distance (drawing mm). */
   readonly filletRadiusMm: number;
   readonly chamferDistanceMm: number;
+  /** Polygon tool: number of sides. */
+  readonly polygonSides: number;
+  /** Text tool: letter height of new text, PAPER mm. */
+  readonly textHeightMm: number;
   readonly message: string;
 }
 
@@ -160,6 +170,8 @@ export function createInitialState(): EditorState {
     mirrorKeepSource: true,
     filletRadiusMm: 10,
     chamferDistanceMm: 5,
+    polygonSides: 6,
+    textHeightMm: 3.5,
     message: 'Ready',
   };
 }
@@ -188,6 +200,8 @@ export type EditorAction =
   | { type: 'setOffsetDistance'; mm: number }
   | { type: 'setMirrorKeepSource'; keep: boolean }
   | { type: 'setFilletRadius'; mm: number }
+  | { type: 'setPolygonSides'; sides: number }
+  | { type: 'setTextHeight'; mm: number }
   | { type: 'setChamferDistance'; mm: number }
   | { type: 'undo' }
   | { type: 'redo' }
@@ -396,6 +410,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return action.mm > 0 && Number.isFinite(action.mm) ? { ...state, offsetDistanceMm: action.mm } : state;
     case 'setMirrorKeepSource':
       return { ...state, mirrorKeepSource: action.keep };
+    case 'setPolygonSides':
+      return Number.isInteger(action.sides) && action.sides >= 3 && action.sides <= 64 ? { ...state, polygonSides: action.sides } : state;
+    case 'setTextHeight':
+      return action.mm > 0 && action.mm <= 100 ? { ...state, textHeightMm: action.mm } : state;
     case 'setFilletRadius':
       return action.mm >= 0 && Number.isFinite(action.mm) ? { ...state, filletRadiusMm: action.mm } : state;
     case 'setChamferDistance':
@@ -435,6 +453,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         mirrorKeepSource: state.mirrorKeepSource,
         filletRadiusMm: state.filletRadiusMm,
         chamferDistanceMm: state.chamferDistanceMm,
+        polygonSides: state.polygonSides,
+        textHeightMm: state.textHeightMm,
         message: 'New drawing',
       };
     }

@@ -50,6 +50,9 @@ export function shapeKeyPoints(s: Shape): KeyedPoint[] {
       return [
         ...s.points.map((p, i) => ({ key: `v${i}`, kind: 'endpoint' as const, point: p })),
         ...s.points.slice(1).map((p, i) => ({ key: `sm${i}`, kind: 'midpoint' as const, point: midpoint(s.points[i], p) })),
+        ...(s.closed && s.points.length > 2
+          ? [{ key: `sm${s.points.length - 1}`, kind: 'midpoint' as const, point: midpoint(s.points[s.points.length - 1], s.points[0]) }]
+          : []),
       ];
   }
 }
@@ -83,6 +86,6 @@ export function shapePrimitives(s: Shape): Primitive[] {
     case 'arc':
       return [{ type: 'arc', c: s.center, r: s.radius, startDeg: s.startDeg, sweepDeg: s.sweepDeg }];
     case 'polyline':
-      return segs(s.points, false);
+      return segs(s.points, !!s.closed && s.points.length > 2);
   }
 }

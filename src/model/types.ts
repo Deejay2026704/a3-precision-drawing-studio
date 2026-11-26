@@ -59,10 +59,12 @@ export interface ArcShape extends ShapeBase {
   readonly sweepDeg: number;
 }
 
-/** Freehand polyline (open). */
+/** Polyline: freehand or clicked vertices. `closed` joins the last vertex back to the first (polygon). */
 export interface PolylineShape extends ShapeBase {
   readonly kind: 'polyline';
   readonly points: readonly Vec2[];
+  /** Absent/false = open (all files before format 5). */
+  readonly closed?: boolean;
 }
 
 export type Shape = LineShape | RectShape | CircleShape | ArcShape | PolylineShape;

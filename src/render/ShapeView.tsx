@@ -53,6 +53,6 @@ export const ShapeView = memo(function ShapeView({ shape, transform, stroke, das
       return <path {...common} d={`M ${a.x} ${a.y} A ${rp} ${rp} 0 ${shape.sweepDeg > 180 ? 1 : 0} 0 ${b.x} ${b.y}`} />;
     }
     case 'polyline':
-      return <polyline {...common} points={pts(shape.points.map(S))} />;
+      return shape.closed ? <polygon {...common} points={pts(shape.points.map(S))} /> : <polyline {...common} points={pts(shape.points.map(S))} />;
   }
 });

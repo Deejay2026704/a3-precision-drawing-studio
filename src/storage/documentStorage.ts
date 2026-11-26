@@ -211,7 +211,12 @@ function shape(v: unknown, index: number): Shape {
     case 'polyline': {
       const pts = arr(o.points, `${where}.points`);
       if (pts.length < 1) throw err(`${where}.points`, 'must contain at least one point');
-      return { ...base, kind: 'polyline', points: pts.map((p, i) => point(p, `${where}.points[${i}]`)) };
+      const points = pts.map((p, i) => point(p, `${where}.points[${i}]`));
+      if (o.closed !== undefined && bool(o, 'closed', where)) {
+        if (points.length < 3) throw err(`${where}.points`, 'a closed polyline needs at least 3 points');
+        return { ...base, kind: 'polyline', points, closed: true };
+      }
+      return { ...base, kind: 'polyline', points };
     }
     default:
       throw err(`${where}.kind`, `unknown shape kind "${String(o.kind)}"`);

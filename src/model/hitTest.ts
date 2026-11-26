@@ -2,7 +2,7 @@ import { boundsContains, type Bounds } from '../geometry/bounds';
 import { distance, distanceToSegment, type Vec2 } from '../geometry/vec';
 import { distanceToArc } from '../geometry/arc';
 import { arcGeom } from './arcs';
-import { rectCorners, shapeBounds } from './shapes';
+import { polylineSegments, rectCorners, shapeBounds } from './shapes';
 import type { Shape, ShapeId } from './types';
 
 /** Distance (world mm) from p to the outline of a shape. */
@@ -21,7 +21,7 @@ export function distanceToShape(s: Shape, p: Vec2): number {
     case 'polyline': {
       if (s.points.length === 1) return distance(p, s.points[0]);
       let d = Infinity;
-      for (let i = 1; i < s.points.length; i++) d = Math.min(d, distanceToSegment(p, s.points[i - 1], s.points[i]));
+      for (const [a, b] of polylineSegments(s)) d = Math.min(d, distanceToSegment(p, a, b));
       return d;
     }
   }

@@ -29,7 +29,7 @@ import { DimensionGrips, HANDLE_SIZE_PX, ROTATE_HANDLE_OFFSET_PX, SelectionOverl
 import { CursorFeedback, SnapMarker } from '../render/SnapMarker';
 import { ShapeView } from '../render/ShapeView';
 import { SheetView } from '../render/SheetView';
-import { newSession, sessionInProgress, toolClick, toolPreview, type SessionTool, type ToolInput, type ToolSession } from './interaction/toolSession';
+import { newSession, sessionInProgress, toolClick, toolFinish, toolPreview, toolUndoPoint, type SessionTool, type ToolInput, type ToolSession, type ToolStep } from './interaction/toolSession';
 import { snapSettingsOf, TOOL_PROMPTS, type EditorAction, type EditorState, type ToolId } from './state/editorReducer';
 
 const HIT_TOLERANCE_PX = 6;
@@ -76,7 +76,7 @@ function describeShape(s: Shape): string {
     case 'arc':
       return `R ${fmt(s.radius)}  ∠ ${formatNumber(s.sweepDeg, 2)}°  L ${fmt((s.radius * s.sweepDeg * Math.PI) / 180)} mm`;
     case 'polyline':
-      return `${s.points.length} points`;
+      return `${s.points.length} points${s.closed ? ' (closed)' : ''}`;
   }
 }
 
@@ -172,6 +172,25 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
       if (e.code === 'Space') {
         spaceDown.current = true;
         e.preventDefault();
+      }
+      if ((e.key === 'Enter' || e.key === 'Backspace') && sessionInProgress(sessionRef.current)) {
+        const s = sessionRef.current!;
+        if (e.key === 'Enter') {
+          const step = finishRef.current(s);
+          if (step) {
+            applyStepRef.current(step);
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        } else {
+          const next = toolUndoPoint(s);
+          if (next) {
+            setSession(next);
+            e.preventDefault();
+            e.stopPropagation(); // not "delete selection"
+          }
+        }
+        return;
       }
       if (e.key !== 'Escape') return;
       const d = dragRef.current;
@@ -311,9 +330,27 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
     drawStyle: state.drawStyle,
     filletRadiusMm: state.filletRadiusMm,
     chamferDistanceMm: state.chamferDistanceMm,
+    polygonSides: state.polygonSides,
     canEdit: (sh) => isEditable(doc, sh),
     canSee: (sh) => isVisible(doc, sh),
   });
+
+  const applyStep = (step: ToolStep) => {
+    setSession(step.session);
+    if (step.kind === 'continue') {
+      if (step.selection) dispatch({ type: 'setSelection', ids: step.selection });
+      dispatch({ type: 'setMessage', message: step.prompt });
+    } else if (step.kind === 'commit') {
+      dispatch({ type: 'commitDocument', doc: step.doc, selection: step.selection, message: step.message });
+      setFeedback(null);
+    } else {
+      dispatch({ type: 'setMessage', message: `⚠ ${step.message}` });
+    }
+  };
+  const applyStepRef = useRef(applyStep);
+  applyStepRef.current = applyStep;
+  const finishRef = useRef((s: ToolSession) => toolFinish(s, toolInput(hover?.raw ?? vec(0, 0), null)));
+  finishRef.current = (s: ToolSession) => toolFinish(s, toolInput(hover?.raw ?? vec(0, 0), null));
 
   /** Base point for perpendicular / tangent snaps in the current context. */
   const contextBase = (): Vec2 | null => {
@@ -418,17 +455,7 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
         return;
       }
       const snap = snapAt(wp, { base: contextBase() });
-      const step = toolClick(session, toolInput(wp, snap));
-      setSession(step.session);
-      if (step.kind === 'continue') {
-        if (step.selection) dispatch({ type: 'setSelection', ids: step.selection });
-        dispatch({ type: 'setMessage', message: step.prompt });
-      } else if (step.kind === 'commit') {
-        dispatch({ type: 'commitDocument', doc: step.doc, selection: step.selection, message: step.message });
-        setFeedback(null);
-      } else {
-        dispatch({ type: 'setMessage', message: `⚠ ${step.message}` });
-      }
+      applyStep(toolClick(session, toolInput(wp, snap)));
       return;
     }
 
@@ -597,6 +624,11 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
           height={size.height}
           style={{ cursor }}
           onPointerDown={onPointerDown}
+          onDoubleClick={() => {
+            const st = sessionRef.current;
+            const step = st ? finishRef.current(st) : null;
+            if (step) applyStep(step);
+          }}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerLeave={() => {
@@ -699,7 +731,7 @@ export function describeCreated(s: Shape): string {
     case 'arc':
       return `Arc created – radius ${formatNumber(s.radius)} mm, ${formatNumber(s.sweepDeg)}°`;
     case 'polyline':
-      return `Freehand polyline created – ${s.points.length} points`;
+      return `${s.closed ? 'Closed polyline' : 'Polyline'} created – ${s.points.length} points`;
   }
 }
 

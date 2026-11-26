@@ -11,7 +11,7 @@ import { distanceToShape } from '../../model/hitTest';
 import { extendLine, mirrorShape, mirrorShapes, offsetShape, trimPreviewShape, trimShape, type EditResult } from '../../model/modify';
 import { chamferLines, filletLines } from '../../model/curves';
 import type { SnapResult } from '../../model/snap';
-import { createArc, createLine } from '../../model/shapes';
+import { createArc, createLine, createPolygon, createPolyline, polylineLength } from '../../model/shapes';
 import { arcThroughPoints } from '../../geometry/arc';
 import type { DimAnchor, Dimension, DimensionStyle, DrawingDocument, Shape, ShapeId, ShapeKind, ShapeStyle } from '../../model/types';
 import type { ConstraintToolId, DimensionToolId, ModifyToolId } from '../state/editorReducer';
@@ -24,7 +24,7 @@ import type { PointRef } from '../../model/types';
  * The canvas feeds it snapped clicks; it returns either "continue" (with a prompt),
  * a document to commit (one undo step), or a refusal message. No DOM, no React.
  */
-export type SessionTool = 'arc' | ModifyToolId | DimensionToolId | ConstraintToolId;
+export type SessionTool = 'arc' | 'polyline' | 'polygon' | ModifyToolId | DimensionToolId | ConstraintToolId;
 
 export interface ToolSession {
   readonly tool: SessionTool;
@@ -60,6 +60,7 @@ export interface ToolInput {
   readonly drawStyle?: ShapeStyle;
   readonly filletRadiusMm?: number;
   readonly chamferDistanceMm?: number;
+  readonly polygonSides?: number;
 }
 
 export type ToolStep =
@@ -116,6 +117,25 @@ export function toolClick(session: ToolSession, input: ToolInput): ToolStep {
   const canSee = input.canSee ?? (() => true);
 
   switch (session.tool) {
+    case 'polyline': {
+      const prev = session.points;
+      if (prev.length > 0 && distance(point, prev[prev.length - 1]) < 1e-9) {
+        // Second click of a double-click (or a repeated click): nothing to add.
+        return { kind: 'continue', session, prompt: POLY_PROMPT };
+      }
+      if (prev.length >= 3 && distance(raw, prev[0]) <= tolerance) return commitPolyline(session, input, prev, true);
+      return { kind: 'continue', session: { ...session, points: [...prev, point] }, prompt: prev.length === 0 ? 'Polyline: click the next point' : POLY_PROMPT };
+    }
+    case 'polygon': {
+      const sides = input.polygonSides ?? 6;
+      if (session.points.length === 0) return { kind: 'continue', session: { ...session, points: [point] }, prompt: `Polygon (${sides} sides): click a corner` };
+      const c = session.points[0];
+      const r = distance(c, point);
+      if (r < 1e-9) return { kind: 'error', session, message: 'The corner coincides with the centre' };
+      const rot = (Math.atan2(point.y - c.y, point.x - c.x) * 180) / Math.PI;
+      const poly = createPolygon(input.newId(), c, r, sides, rot, input.drawStyle);
+      return { kind: 'commit', session: reset, doc: { ...doc, shapes: [...doc.shapes, poly] }, selection: [poly.id], message: `Polygon created – ${sides} sides, radius ${formatNumber(r)} mm` };
+    }
     case 'arc': {
       const pts = [...session.points, point];
       if (pts.length >= 2 && distance(pts[pts.length - 1], pts[pts.length - 2]) < 1e-9) {
@@ -132,7 +152,7 @@ export function toolClick(session: ToolSession, input: ToolInput): ToolStep {
     case 'trim':
     case 'extend': {
       const s = pickShape(doc, raw, tolerance, undefined, canEdit);
-      if (!s) return { kind: 'error', session, message: `Click on ${session.tool === 'trim' ? 'a line, circle or arc to trim' : 'a line to extend'} (objects on locked or hidden layers cannot be changed)` };
+      if (!s) return { kind: 'error', session, message: `Click on ${session.tool === 'trim' ? 'a line, circle, arc or polyline to trim' : 'a line to extend'} (objects on locked or hidden layers cannot be changed)` };
       return fromEdit(session, session.tool === 'trim' ? trimShape(doc, s.id, raw, input.newId) : extendLine(doc, s.id, raw));
     }
 
@@ -238,6 +258,33 @@ export function toolClick(session: ToolSession, input: ToolInput): ToolStep {
   }
 }
 
+const POLY_PROMPT = 'Polyline: next point – Enter or double-click finishes, clicking the first point closes it, Backspace removes the last point';
+
+function commitPolyline(session: ToolSession, input: ToolInput, pts: readonly Vec2[], closed: boolean): ToolStep {
+  const reset = newSession(session.tool);
+  if (pts.length < 2) return { kind: 'error', session, message: 'A polyline needs at least two points' };
+  const p = createPolyline(input.newId(), pts, input.drawStyle, closed);
+  return {
+    kind: 'commit',
+    session: reset,
+    doc: { ...input.doc, shapes: [...input.doc.shapes, p] },
+    selection: [p.id],
+    message: `${closed ? 'Closed polyline' : 'Polyline'} created – ${pts.length} points, ${formatNumber(polylineLength(p))} mm long`,
+  };
+}
+
+/** Enter / double-click: finish a multi-point tool. Returns null when the tool has nothing to finish. */
+export function toolFinish(session: ToolSession, input: ToolInput): ToolStep | null {
+  if (session.tool !== 'polyline' || session.points.length === 0) return null;
+  return commitPolyline(session, input, session.points, false);
+}
+
+/** Backspace: remove the last point of a multi-point tool. */
+export function toolUndoPoint(session: ToolSession): ToolSession | null {
+  if (session.tool !== 'polyline' || session.points.length === 0) return null;
+  return { ...session, points: session.points.slice(0, -1) };
+}
+
 export interface ToolPreview {
   readonly shapes: readonly Shape[];
   readonly dimensions: readonly Dimension[];
@@ -254,6 +301,25 @@ export function toolPreview(session: ToolSession, input: ToolInput): ToolPreview
   const { doc, raw, point, tolerance } = input;
   const previewId = () => '__preview__';
   switch (session.tool) {
+    case 'polyline': {
+      const p = session.points;
+      if (p.length === 0) return EMPTY;
+      const closing = p.length >= 3 && distance(raw, p[0]) <= tolerance;
+      const pts = closing ? p : [...p, point];
+      return {
+        ...EMPTY,
+        shapes: [createPolyline('__preview__', pts, input.drawStyle, closing)],
+        feedback: closing ? 'Click to close' : `${formatNumber(distance(p[p.length - 1], point))} mm`,
+      };
+    }
+    case 'polygon': {
+      if (session.points.length === 0) return EMPTY;
+      const c = session.points[0];
+      const r = distance(c, point);
+      if (r < 1e-9) return EMPTY;
+      const rot = (Math.atan2(point.y - c.y, point.x - c.x) * 180) / Math.PI;
+      return { ...EMPTY, shapes: [createPolygon('__preview__', c, r, input.polygonSides ?? 6, rot, input.drawStyle)], feedback: `R ${formatNumber(r)} mm  ∠ ${formatNumber(rot, 2)}°` };
+    }
     case 'arc': {
       const p = session.points;
       if (p.length === 1) return { ...EMPTY, shapes: [createLine('__rubber__', p[0], point)], feedback: `${formatNumber(distance(p[0], point))} mm` };
@@ -269,10 +335,11 @@ export function toolPreview(session: ToolSession, input: ToolInput): ToolPreview
       return EMPTY;
     }
     case 'trim': {
-      const s = pickShape(doc, raw, tolerance, ['line', 'circle', 'arc'], input.canEdit);
+      const s = pickShape(doc, raw, tolerance, ['line', 'circle', 'arc', 'polyline'], input.canEdit);
       const piece = s ? trimPreviewShape(doc, s.id, raw) : null;
       if (!piece) return EMPTY;
-      const len = piece.kind === 'line' ? distance(piece.start, piece.end) : piece.kind === 'arc' ? (piece.radius * piece.sweepDeg * Math.PI) / 180 : 0;
+      const len =
+        piece.kind === 'line' ? distance(piece.start, piece.end) : piece.kind === 'arc' ? (piece.radius * piece.sweepDeg * Math.PI) / 180 : piece.kind === 'polyline' ? polylineLength(piece) : 0;
       return { ...EMPTY, removedShapes: [piece], feedback: `Remove ${formatNumber(len)} mm` };
     }
     case 'fillet':

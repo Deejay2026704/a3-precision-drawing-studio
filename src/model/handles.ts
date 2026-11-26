@@ -11,10 +11,14 @@ import type { Shape } from './types';
  * Selection handles, computed in WORLD coordinates from the model.
  * The UI converts them to screen positions for drawing and hit testing.
  */
-export type HandleId = BoxHandle | 'start' | 'end' | 'rotate' | 'move' | 'radius';
+/** `v<i>`: an inner polyline vertex (the first/last vertex use 'start'/'end'). */
+export type VertexHandle = `v${number}`;
+export type HandleId = BoxHandle | 'start' | 'end' | 'rotate' | 'move' | 'radius' | VertexHandle;
+
+export const isVertexHandle = (id: HandleId): id is VertexHandle => /^v\d+$/.test(id);
 
 /** Grips move a point of the geometry exactly to the (snapped) cursor; the others resize/rotate. */
-export const isGrip = (id: HandleId): boolean => id === 'start' || id === 'end' || id === 'move' || id === 'radius';
+export const isGrip = (id: HandleId): boolean => id === 'start' || id === 'end' || id === 'move' || id === 'radius' || isVertexHandle(id);
 
 export interface Handle {
   readonly id: HandleId;
@@ -124,6 +128,7 @@ export function getSelectionFrame(shapes: readonly Shape[], rotateOffset: number
           s.points.length > 1
             ? [
                 { id: 'start', position: s.points[0] },
+                ...s.points.slice(1, -1).map((p, i): Handle => ({ id: `v${i + 1}`, position: p })),
                 { id: 'end', position: s.points[s.points.length - 1] },
               ]
             : [];
@@ -215,9 +220,9 @@ export function applyHandleDrag(
       return [s];
     }
     case 'polyline':
-      if (handle === 'start' || handle === 'end') {
+      if (handle === 'start' || handle === 'end' || isVertexHandle(handle)) {
         const pts = [...s.points];
-        pts[handle === 'start' ? 0 : pts.length - 1] = p;
+        pts[handle === 'start' ? 0 : handle === 'end' ? pts.length - 1 : Number(handle.slice(1))] = p;
         return [{ ...s, points: pts }];
       }
       return [resizeBoundsByHandle(s, handle as BoxHandle, p)];
