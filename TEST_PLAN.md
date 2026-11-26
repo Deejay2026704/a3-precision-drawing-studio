@@ -225,7 +225,7 @@ File ▸ Check for updates brings it back. **Windows:** *Download and install* d
 *Restart now* closes the app, the silent installer replaces the installed program
 (its version resource becomes 99.0.0) and the relaunched app reports 99.0.0.
 **macOS (unsigned):** only *Open download page* is offered, and it opens this project's
-release page for that version.
+release page for that version. Results: **Windows 9/9, macOS 7/7** (CI run 45780810378).
 
 ### Packaged-app smoke test: `tests-e2e/packaged-smoke.mjs` (any OS)
 

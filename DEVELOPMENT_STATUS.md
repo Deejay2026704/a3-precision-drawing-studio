@@ -57,7 +57,14 @@ unsigned while they are absent (README ▸ Code signing). The signed paths are *
 * Unit tests: **30 files, 315 tests passing**; typecheck clean (renderer + Electron).
 * End-to-end (local, real Electron): M1 64, M2 62, M3 78, M4 31, **M5 53** — all passing;
   packaged Linux build smoke test 18/18.
-* CI: __CI_RESULT__
+* CI run [45780810378](https://github.com/Deejay2026704/a3-precision-drawing-studio/actions/runs/45780810378)
+  (commit `c72d8c2`), all jobs green:
+
+  | Job | Result |
+  | --- | --- |
+  | Linux | typecheck; 313 unit tests (2 poppler tests skipped – not on the runner); E2E 64 + 62 + 78 + 30 + 47 (poppler checks skipped) |
+  | **Windows** | NSIS build; silent install; 18/18 smoke checks on the installed app; **auto-update 9/9**: the installed 0.5.0 found 99.0.0 on a local update server, downloaded it only after consent (SHA-512 checked), *Restart now* installed it silently in place, the relaunched app reported 99.0.0; silent uninstall |
+  | **macOS** (Apple Silicon) | DMG + ZIP; install from DMG; codesign verify; 18/18 smoke checks; **update check 7/7**: unsigned build offers the update with *Open download page* (correct release URL), no in-place install |
 
 ### Defects found and fixed during Milestone 5
 1. **Ribbon grew taller** on the Draw tab (new buttons and fields overflowed at 1440 px),
