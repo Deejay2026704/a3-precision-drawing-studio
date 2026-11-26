@@ -192,7 +192,7 @@ export function Ribbon({ tab, state, dispatch, zoom, view, edit, constrain }: Pr
             {tool('extend', 'extend', 'Extend', 'E', 'click near a line end to extend it to the next object')}
             {tool('offset', 'offset', 'Offset', 'O', 'click an object, then the side: creates a parallel copy')}
             {tool('mirror', 'mirror', 'Mirror', 'M', 'select objects, then click two points on the mirror line')}
-            {tool('fillet', 'fillet', 'Fillet', '', 'round the corner between two lines with an arc (radius in Properties; 0 = sharp corner)')}
+            {tool('fillet', 'fillet', 'Fillet', '', 'round the corner between lines, arcs and circles (radius in Properties; 0 = sharp corner between lines)')}
             {tool('chamfer', 'chamfer', 'Chamfer', '', 'cut the corner between two lines (distance in Properties; 0 = sharp corner)')}
             <div className="ribbon-stack">
               <div className="ribbon-number" title="Offset distance in drawing millimetres">

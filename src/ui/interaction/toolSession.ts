@@ -9,7 +9,8 @@ import {
 } from '../../model/dimensions';
 import { distanceToShape } from '../../model/hitTest';
 import { extendLine, mirrorShape, mirrorShapes, offsetShape, trimPreviewShape, trimShape, type EditResult } from '../../model/modify';
-import { chamferLines, filletLines } from '../../model/curves';
+import { chamferLines } from '../../model/curves';
+import { filletAny } from '../../model/filletCurves';
 import type { SnapResult } from '../../model/snap';
 import { createArc, createLine, createPolygon, createPolyline, polylineLength } from '../../model/shapes';
 import { arcThroughPoints } from '../../geometry/arc';
@@ -166,14 +167,15 @@ export function toolClick(session: ToolSession, input: ToolInput): ToolStep {
 
     case 'fillet':
     case 'chamfer': {
-      const l = pickShape(doc, raw, tolerance, ['line'], canEdit);
-      if (!l) return { kind: 'error', session, message: 'Click on a line (on the side you want to keep)' };
+      const fillet = session.tool === 'fillet';
+      const l = pickShape(doc, raw, tolerance, fillet ? ['line', 'circle', 'arc'] : ['line'], canEdit);
+      if (!l) return { kind: 'error', session, message: fillet ? 'Click on a line, circle or arc (on the part you want to keep)' : 'Click on a line (on the side you want to keep)' };
       if (session.picks.length === 0) {
-        return { kind: 'continue', session: { ...session, picks: [l.id], points: [raw] }, selection: [l.id], prompt: `${session.tool === 'fillet' ? 'Fillet' : 'Chamfer'}: click the second line on the side to keep` };
+        return { kind: 'continue', session: { ...session, picks: [l.id], points: [raw] }, selection: [l.id], prompt: fillet ? 'Fillet: click the second object on the part to keep' : 'Chamfer: click the second line on the side to keep' };
       }
       const r =
-        session.tool === 'fillet'
-          ? filletLines(doc, session.picks[0], session.points[0], l.id, raw, input.filletRadiusMm ?? 10, input.newId)
+        fillet
+          ? filletAny(doc, session.picks[0], session.points[0], l.id, raw, input.filletRadiusMm ?? 10, input.newId)
           : chamferLines(doc, session.picks[0], session.points[0], l.id, raw, input.chamferDistanceMm ?? 5, input.chamferDistanceMm ?? 5, input.newId);
       return r.ok ? fromEdit(reset, r) : { kind: 'error', session: reset, message: r.message };
     }
@@ -355,11 +357,11 @@ export function toolPreview(session: ToolSession, input: ToolInput): ToolPreview
     case 'fillet':
     case 'chamfer': {
       if (session.picks.length === 0) return EMPTY;
-      const l = pickShape(doc, raw, tolerance, ['line'], input.canEdit);
+      const l = pickShape(doc, raw, tolerance, session.tool === 'fillet' ? ['line', 'circle', 'arc'] : ['line'], input.canEdit);
       if (!l || l.id === session.picks[0]) return EMPTY;
       const r =
         session.tool === 'fillet'
-          ? filletLines(doc, session.picks[0], session.points[0], l.id, raw, input.filletRadiusMm ?? 10, () => '__preview__')
+          ? filletAny(doc, session.picks[0], session.points[0], l.id, raw, input.filletRadiusMm ?? 10, () => '__preview__')
           : chamferLines(doc, session.picks[0], session.points[0], l.id, raw, input.chamferDistanceMm ?? 5, input.chamferDistanceMm ?? 5, () => '__preview__');
       if (!r.ok) return { ...EMPTY, feedback: r.message };
       const changed = r.doc.shapes.filter((x) => x.id === '__preview__' || x.id === session.picks[0] || x.id === l.id);

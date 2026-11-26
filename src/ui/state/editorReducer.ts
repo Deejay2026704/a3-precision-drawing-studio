@@ -69,7 +69,7 @@ export const TOOL_PROMPTS: Record<ToolId, string> = {
   extend: 'Extend: click a line near the end to extend',
   offset: 'Offset: click the object to offset',
   mirror: 'Mirror: select objects (Shift+click), then click two points on the mirror line',
-  fillet: 'Fillet: click the first line on the side to keep',
+  fillet: 'Fillet: click the first line, circle or arc on the part to keep',
   chamfer: 'Chamfer: click the first line on the side to keep',
   'dim-aligned': 'Aligned dimension: click the first point',
   'dim-horizontal': 'Horizontal dimension: click the first point',
