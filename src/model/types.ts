@@ -3,6 +3,10 @@ import type { PageSize } from '../geometry/page';
 import type { Vec2 } from '../geometry/vec';
 
 export type ShapeId = string;
+export type LayerId = string;
+
+/** Stroke value meaning "use the layer's display colour". */
+export const BY_LAYER = 'bylayer';
 
 /** Visual style. Line weight is in PAPER millimetres (it does not scale with the drawing). */
 export interface ShapeStyle {
@@ -13,6 +17,8 @@ export interface ShapeStyle {
 interface ShapeBase {
   readonly id: ShapeId;
   readonly style: ShapeStyle;
+  /** Owning layer (Milestone 3). Absent only on objects created before layers existed → default layer. */
+  readonly layerId?: LayerId;
 }
 
 /** All geometry below is in drawing (real-world) millimetres, origin bottom-left, Y up. */
@@ -88,6 +94,7 @@ export type DimensionMode = 'driven';
 
 interface DimensionBase {
   readonly id: ShapeId;
+  readonly layerId?: LayerId;
   readonly mode: DimensionMode;
   readonly style: DimensionStyle;
   /** Text displacement along the dimension line / arc (drawing mm). */
@@ -143,13 +150,78 @@ export const DEFAULT_DIMENSION_STYLE: DimensionStyle = Object.freeze({
   extensionOvershootMm: 1.5,
 });
 
+// ---------------------------------------------------------------------------
+// Layers (Milestone 3)
+// ---------------------------------------------------------------------------
+
+export interface Layer {
+  readonly id: LayerId;
+  readonly name: string;
+  readonly visible: boolean;
+  readonly locked: boolean;
+  /** Display colour used by objects whose stroke is "By layer". */
+  readonly color: string;
+}
+
+export const DEFAULT_LAYER_ID: LayerId = 'layer-0';
+export const DEFAULT_LAYER: Layer = Object.freeze({ id: DEFAULT_LAYER_ID, name: 'Default', visible: true, locked: false, color: '#000000' });
+
+// ---------------------------------------------------------------------------
+// Geometric constraints (Milestone 3) – DRIVING: they control geometry.
+// ---------------------------------------------------------------------------
+
+/** A constrainable point: line start/end/mid or circle centre. */
+export interface PointRef {
+  readonly shapeId: ShapeId;
+  readonly key: 'start' | 'end' | 'mid' | 'center';
+}
+
+interface ConstraintBase {
+  readonly id: ShapeId;
+  /** Suppressed constraints are kept but ignored by the solver. */
+  readonly suppressed: boolean;
+}
+
+export type Constraint = ConstraintBase &
+  (
+    | { readonly kind: 'horizontal' | 'vertical'; readonly line: ShapeId }
+    | { readonly kind: 'parallel' | 'perpendicular' | 'equal-length'; readonly a: ShapeId; readonly b: ShapeId }
+    /** a: line or circle, b: circle. internal: circle-circle tangency on the inside. */
+    | { readonly kind: 'tangent'; readonly a: ShapeId; readonly b: ShapeId; readonly internal: boolean }
+    | { readonly kind: 'coincident'; readonly p: PointRef; readonly q: PointRef }
+    | { readonly kind: 'fixed-length'; readonly line: ShapeId; readonly value: number }
+    /** Absolute direction of the line, degrees CCW from +X. */
+    | { readonly kind: 'fixed-angle'; readonly line: ShapeId; readonly value: number }
+    | { readonly kind: 'fixed-position'; readonly p: PointRef; readonly x: number; readonly y: number }
+  );
+
+export type ConstraintKind = Constraint['kind'];
+
+export const CONSTRAINT_LABELS: Record<ConstraintKind, string> = {
+  horizontal: 'Horizontal',
+  vertical: 'Vertical',
+  coincident: 'Coincident',
+  parallel: 'Parallel',
+  perpendicular: 'Perpendicular',
+  tangent: 'Tangent',
+  'equal-length': 'Equal length',
+  'fixed-length': 'Fixed length',
+  'fixed-angle': 'Fixed angle',
+  'fixed-position': 'Fixed position',
+};
+
+export type PageOrientation = 'landscape' | 'portrait';
+
 export interface DrawingDocument {
   readonly page: PageSize;
   readonly scale: DrawingScale;
-  /** Painting order: later shapes are drawn on top. */
+  /** Painting order: later shapes are drawn on top (within their layer). */
   readonly shapes: readonly Shape[];
-  /** Annotation layer, drawn above shapes. */
+  /** Annotation objects, drawn above shapes. */
   readonly dimensions: readonly Dimension[];
+  /** Bottom-to-top order. Always at least one layer. */
+  readonly layers: readonly Layer[];
+  readonly constraints: readonly Constraint[];
 }
 
 export const DEFAULT_STYLE: ShapeStyle = Object.freeze({ stroke: '#000000', strokeWidthMm: 0.35 });

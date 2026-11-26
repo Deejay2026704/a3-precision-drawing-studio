@@ -47,8 +47,8 @@ export function DimensionProperties({ dim, doc, dispatch }: { dim: Dimension; do
     <>
       <section className="panel-section" data-testid={`props-dim-${dim.kind}`}>
         <h3>{DIMENSION_KIND_LABELS[dim.kind]}</h3>
-        <div className="driven-badge" data-testid="dim-mode" title="A driven dimension MEASURES the geometry it is linked to and updates automatically. Its value cannot be typed: change the geometry instead. (User-entered constraints that drive geometry would be a separate, clearly marked type.)">
-          Driven · measured from geometry
+        <div className="driven-badge" data-testid="dim-mode" title="A reference (driven) dimension only MEASURES the geometry it is linked to and updates automatically. Its value cannot be typed. To control geometry, use a driving constraint on the Constrain tab (e.g. Fixed length).">
+          Reference dimension · Driven (measures, does not control)
         </div>
         <NumberField label="Value" testId="dim-value" unit={unit} value={value ?? NaN} readOnly title="Measured value (read-only)" />
         <dl className="info">

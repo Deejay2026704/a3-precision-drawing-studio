@@ -11,10 +11,11 @@ const run = (s: EditorState, ...a: EditorAction[]) => a.reduce(editorReducer, s)
 let n = 0;
 const newId = () => `id${++n}`;
 
-const L = createLine('L', vec(0, 0), vec(100, 0));
-const A = createLine('A', vec(30, -10), vec(30, 10));
-const W = createLine('W', vec(150, -10), vec(150, 10));
-const C = createCircle('C', vec(50, 60), 20);
+const onLayer = <T>(x: T): T => ({ ...x, layerId: 'layer-0' });
+const L = onLayer(createLine('L', vec(0, 0), vec(100, 0)));
+const A = onLayer(createLine('A', vec(30, -10), vec(30, 10)));
+const W = onLayer(createLine('W', vec(150, -10), vec(150, 10)));
+const C = onLayer(createCircle('C', vec(50, 60), 20));
 
 const start = () => run(createInitialState(), { type: 'addShapes', shapes: [L, A, W, C] });
 
@@ -55,7 +56,7 @@ describe('undo / redo for every Milestone 2 operation', () => {
     const s2 = run(s1, { type: 'updateDimensions', dimensions: [{ ...turned, style: { ...S, decimals: 0 } }] });
     expect(s2.doc.dimensions[0]).toMatchObject({ angleDeg: 90 });
     const u = run(s2, { type: 'undo' });
-    expect(u.doc.dimensions[0]).toEqual(d.value);
+    expect(u.doc.dimensions[0]).toEqual({ ...d.value, layerId: 'layer-0' });
   });
 
   it('deleting a shape with dependent dimensions is one step; undo restores both', () => {

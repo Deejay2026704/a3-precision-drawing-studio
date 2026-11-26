@@ -5,6 +5,8 @@ import type { Vec2 } from '../geometry/vec';
 import { Icon } from './Icon';
 import { ZoomSelect, type ViewCommands } from './Ribbon';
 import { TOOL_LABELS, type EditorAction, type EditorState } from './state/editorReducer';
+import { constraintStatuses } from '../model/constraints';
+import { layerOf } from '../model/layers';
 
 interface Props {
   state: EditorState;
@@ -29,12 +31,16 @@ export function StatusBar({ state, dispatch, cursor, feedback, zoom, view }: Pro
       <span className={`status-cell status-tool${state.tool !== 'select' ? ' active' : ''}`} data-testid="status-tool" title="Active tool (Esc returns to Select)">
         {TOOL_LABELS[state.tool]}
       </span>
+      <span className="status-cell" data-testid="status-layer" title="Active layer: new objects are created here">
+        Layer: {layerOf(state.doc, { layerId: state.activeLayerId }).name}
+      </span>
       <span className="status-cell" data-testid="status-selection">
         {n === 0 ? 'No selection' : `${n} selected`}
       </span>
       <span className="status-cell status-message" data-testid="status-message">
         {state.message}
       </span>
+      <ConstraintSummary state={state} />
       <button
         className={`status-toggle${v.objectSnap ? ' on' : ''}`}
         data-testid="status-osnap"
@@ -68,5 +74,24 @@ export function StatusBar({ state, dispatch, cursor, feedback, zoom, view }: Pro
         </button>
       </span>
     </footer>
+  );
+}
+
+/** Count of driving constraints by status; red when any is not satisfied. */
+function ConstraintSummary({ state }: { state: EditorState }) {
+  if (state.doc.constraints.length === 0) return null;
+  const st = [...constraintStatuses(state.doc).values()];
+  const ok = st.filter((x) => x === 'satisfied').length;
+  const bad = st.filter((x) => x === 'unsatisfied' || x === 'broken').length;
+  const off = st.filter((x) => x === 'suppressed').length;
+  return (
+    <span
+      className={`status-cell status-constraints${bad ? ' bad' : ''}`}
+      data-testid="status-constraints"
+      data-unsatisfied={bad}
+      title={`Driving constraints: ${ok} satisfied, ${bad} not satisfied or broken, ${off} suppressed`}
+    >
+      Constraints {ok}✓{bad ? ` ${bad}⚠` : ''}{off ? ` ${off} off` : ''}
+    </span>
   );
 }

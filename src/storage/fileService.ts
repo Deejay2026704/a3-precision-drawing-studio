@@ -11,6 +11,7 @@ export interface FileService {
   /** Save to an existing path (Electron only). */
   save(path: string, content: string): Promise<string>;
   saveAs(content: string, suggestedName: string): Promise<string | null>;
+  exportSvg(content: string, suggestedName: string): Promise<string | null>;
   readonly canSaveInPlace: boolean;
 }
 
@@ -38,11 +39,15 @@ function browserFileService(): FileService {
       download(name, content);
       return name;
     },
+    exportSvg: async (content, name) => {
+      download(name, content, 'image/svg+xml');
+      return name;
+    },
   };
 }
 
-function download(name: string, content: string): void {
-  const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
+function download(name: string, content: string, type = 'application/json'): void {
+  const url = URL.createObjectURL(new Blob([content], { type }));
   const a = document.createElement('a');
   a.href = url;
   a.download = baseName(name);
@@ -58,5 +63,6 @@ export function getFileService(): FileService {
     open: () => api.openDrawing(),
     save: (path, content) => api.saveDrawing(path, content),
     saveAs: (content, name) => api.saveDrawingAs(content, name),
+    exportSvg: (content, name) => api.exportSvg(content, name),
   };
 }

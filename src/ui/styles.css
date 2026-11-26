@@ -129,3 +129,69 @@ button, select, input { font: inherit; color: inherit; }
 .create-section { border-color: #8ab4f8; }
 .create-btn { width: 100%; padding: 5px; margin-top: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 3px; cursor: pointer; }
 .create-btn:hover { background: #1558b0; }
+
+/* ---------- Milestone 3 ---------- */
+.title-bar .unsaved-badge { background: #fbbc04; color: #202124; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px; }
+.main { grid-template-columns: 1fr 300px; }
+.sidebar { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--chrome-border); background: var(--chrome); }
+.sidebar .properties { flex: 1; min-height: 0; border-left: none; }
+.layers-panel { padding: 8px 10px 6px; border-bottom: 1px solid var(--chrome-border); max-height: 38%; display: flex; flex-direction: column; min-height: 120px; }
+.layers-header { display: flex; align-items: center; justify-content: space-between; }
+.layers-header .panel-title { margin: 0 0 6px; }
+.layers-actions { display: flex; gap: 2px; }
+.layers-actions button { width: 26px; height: 24px; border: 1px solid #c4c4c4; background: #fff; border-radius: 3px; cursor: pointer; font-size: 12px; padding: 0; }
+.layers-actions button:hover:not(:disabled) { background: var(--accent-soft); }
+.layers-actions button:disabled { opacity: 0.4; }
+.layer-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; }
+.layer-row { display: flex; align-items: center; gap: 4px; padding: 3px 6px; cursor: pointer; border-bottom: 1px solid #f0f0f0; }
+.layer-row:hover { background: #f5f8fd; }
+.layer-row.active { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.layer-row.hidden-layer .layer-name { color: #9aa0a6; font-style: italic; }
+.layer-toggle { width: 24px; height: 22px; border: 1px solid transparent; background: none; cursor: pointer; border-radius: 3px; font-size: 12px; padding: 0; opacity: 0.55; }
+.layer-toggle.on { opacity: 1; }
+.layer-toggle.locked { background: #fde7e7; border-color: #f4b4b4; }
+.layer-toggle:hover { border-color: #c4c4c4; }
+.layer-color { width: 22px; height: 20px; padding: 0; border: 1px solid #c4c4c4; border-radius: 3px; background: none; cursor: pointer; }
+.layer-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer-rename-input { flex: 1; min-width: 0; font-size: 12px; padding: 1px 4px; }
+.layer-count { font-size: 11px; color: var(--muted); min-width: 18px; text-align: right; }
+
+.ribbon-glyph { font-size: 18px; font-weight: 600; line-height: 22px; height: 22px; min-width: 22px; text-align: center; color: #6a1b9a; }
+.ribbon-btn:disabled .ribbon-glyph { color: inherit; }
+.constraint-note { max-width: 150px; line-height: 1.35; }
+
+.cmark rect { fill: #f3e8fd; stroke: #6a1b9a; stroke-width: 1; }
+.cmark text { fill: #6a1b9a; font-size: 11px; font-weight: 600; text-anchor: middle; pointer-events: none; }
+.cmark { cursor: pointer; }
+.cmark-unsatisfied rect, .cmark-broken rect { fill: #fce8e6; stroke: #d93025; stroke-width: 1.5; }
+.cmark-unsatisfied text, .cmark-broken text { fill: #d93025; }
+.cmark-broken rect { stroke-dasharray: 3 2; }
+.cmark-suppressed rect { fill: #f1f3f4; stroke: #9aa0a6; stroke-dasharray: 2 2; }
+.cmark-suppressed text { fill: #9aa0a6; text-decoration: line-through; }
+.cmark.selected rect { stroke: #1a73e8; stroke-width: 2; fill: #e8f0fe; }
+
+.driving-badge { display: inline-block; font-size: 11px; color: #6a1b9a; background: #f3e8fd; border: 1px solid #d7aefb; border-radius: 3px; padding: 2px 6px; margin-bottom: 6px; }
+.constraint-status { font-size: 12px; padding: 4px 6px; border-radius: 3px; margin-bottom: 6px; }
+.constraint-status.ok { background: #e6f4ea; color: #137333; }
+.constraint-status.bad { background: #fce8e6; color: #b3261e; font-weight: 600; }
+.constraint-status.off { background: #f1f3f4; color: #5f6368; }
+.danger-btn { width: 100%; padding: 4px; margin-top: 4px; border: 1px solid #d93025; color: #d93025; background: #fff; border-radius: 3px; cursor: pointer; }
+.danger-btn:hover { background: #fce8e6; }
+.status-constraints.bad { background: #b3261e; color: #fff; font-weight: 600; border-radius: 3px; }
+
+.dialog-backdrop { position: fixed; inset: 0; background: rgba(32, 33, 36, 0.45); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.dialog { background: #fff; border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,0.35); padding: 18px 20px 14px; width: 460px; max-width: calc(100vw - 40px); user-select: text; }
+.dialog h2 { margin: 0 0 10px; font-size: 16px; }
+.dialog-message { margin-bottom: 8px; line-height: 1.4; }
+.dialog-detail { margin: 0 0 10px; padding-left: 18px; color: #3c4043; font-size: 12px; max-height: 200px; overflow: auto; }
+.dialog-choice { display: flex; gap: 8px; align-items: center; margin: 6px 0 12px; }
+.dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.dialog-btn { padding: 6px 14px; border-radius: 4px; border: 1px solid #c4c4c4; background: #fff; cursor: pointer; }
+.dialog-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.dialog-btn.danger { border-color: #d93025; color: #d93025; }
+.dialog-btn:focus { outline: 2px solid #8ab4f8; outline-offset: 1px; }
+/* Layout robustness: the drawing area can always shrink; it never overlaps the sidebar. */
+.main { grid-template-columns: minmax(0, 1fr) 300px; }
+.workspace { overflow: hidden; }
+.ribbon { overflow-x: auto; min-width: 0; }
+.app { grid-template-columns: minmax(0, 1fr); }

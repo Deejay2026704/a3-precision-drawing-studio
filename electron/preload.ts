@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('a3Studio', {
   openDrawing: () => ipcRenderer.invoke('file:open'),
   saveDrawing: (path: string, content: string) => ipcRenderer.invoke('file:save', path, content),
   saveDrawingAs: (content: string, suggestedName: string) => ipcRenderer.invoke('file:saveAs', content, suggestedName),
+  exportSvg: (content: string, suggestedName: string) => ipcRenderer.invoke('file:exportSvg', content, suggestedName),
   setDirty: (dirty: boolean) => ipcRenderer.send('doc:dirty', dirty),
   quit: () => ipcRenderer.send('app:quit'),
 });

@@ -2,12 +2,18 @@ import type { DrawingScale } from '../../geometry/scale';
 import { formatScale } from '../../geometry/scale';
 import { addShapes, allItemIds, createEmptyDocument, removeItems, replaceDimensions, replaceShapes, setDocumentScale } from '../../model/document';
 import { DEFAULT_SNAP_SETTINGS, type ObjectSnapKind, type SnapSettings } from '../../model/snap';
+import { constraintShapeIds, solveConstraints } from '../../model/constraints';
+import { isEditable, layerOf, lockedViolation } from '../../model/layers';
+import type { DisplayPrefs, ProjectSettings } from '../../storage/documentStorage';
 import {
+  BY_LAYER,
   DEFAULT_DIMENSION_STYLE,
+  DEFAULT_LAYER_ID,
   DEFAULT_STYLE,
   type Dimension,
   type DimensionStyle,
   type DrawingDocument,
+  type LayerId,
   type Shape,
   type ShapeId,
   type ShapeStyle,
@@ -19,7 +25,8 @@ import {
  */
 export type DimensionToolId = 'dim-aligned' | 'dim-horizontal' | 'dim-vertical' | 'dim-angular' | 'dim-radius' | 'dim-diameter';
 export type ModifyToolId = 'trim' | 'extend' | 'offset' | 'mirror';
-export type ToolId = 'select' | 'line' | 'rect' | 'circle' | 'freehand' | ModifyToolId | DimensionToolId;
+export type ConstraintToolId = 'con-coincident' | 'con-fixed-position';
+export type ToolId = 'select' | 'line' | 'rect' | 'circle' | 'freehand' | ModifyToolId | DimensionToolId | ConstraintToolId;
 
 export const TOOL_LABELS: Record<ToolId, string> = {
   select: 'Select',
@@ -37,6 +44,8 @@ export const TOOL_LABELS: Record<ToolId, string> = {
   'dim-angular': 'Angular dimension',
   'dim-radius': 'Radius dimension',
   'dim-diameter': 'Diameter dimension',
+  'con-coincident': 'Coincident constraint',
+  'con-fixed-position': 'Fixed-position constraint',
 };
 
 /** First prompt shown in the status bar when a tool becomes active. */
@@ -56,6 +65,8 @@ export const TOOL_PROMPTS: Record<ToolId, string> = {
   'dim-angular': 'Angular dimension: click the first line',
   'dim-radius': 'Radius dimension: click a circle',
   'dim-diameter': 'Diameter dimension: click a circle',
+  'con-coincident': 'Coincident: click the first point (line end/midpoint or circle centre)',
+  'con-fixed-position': 'Fixed position: click a line end/midpoint or circle centre to pin it',
 };
 
 export const isDimensionTool = (t: ToolId): t is DimensionToolId => t.startsWith('dim-');
@@ -91,6 +102,10 @@ export interface EditorState {
   /** Snapshot taken at the start of an interactive edit (drag). */
   readonly editBase: DrawingDocument | null;
   readonly filePath: string | null;
+  /** Format version of the file as opened (< current ⇒ saving will upgrade it). */
+  readonly sourceVersion: number | null;
+  /** Layer that receives new objects. */
+  readonly activeLayerId: LayerId;
   readonly fileName: string;
   readonly drawStyle: ShapeStyle;
   readonly view: ViewSettings;
@@ -116,8 +131,10 @@ export function createInitialState(): EditorState {
     future: [],
     editBase: null,
     filePath: null,
+    sourceVersion: null,
+    activeLayerId: DEFAULT_LAYER_ID,
     fileName: 'Untitled.a3d',
-    drawStyle: DEFAULT_STYLE,
+    drawStyle: { ...DEFAULT_STYLE, stroke: BY_LAYER },
     view: {
       showGrid: true,
       snapEnabled: true,
@@ -159,28 +176,107 @@ export type EditorAction =
   | { type: 'undo' }
   | { type: 'redo' }
   | { type: 'newDocument' }
-  | { type: 'loadDocument'; doc: DrawingDocument; path: string | null; name: string }
+  | { type: 'loadDocument'; doc: DrawingDocument; path: string | null; name: string; settings?: ProjectSettings; sourceVersion?: number; message?: string }
+  | { type: 'setActiveLayer'; id: LayerId }
   | { type: 'markSaved'; path: string | null; name: string }
   | { type: 'setMessage'; message: string };
 
 export const isDirty = (s: EditorState): boolean => s.doc !== s.savedDoc;
 
-/** Commit a new document, pushing the previous one onto the undo stack. */
-function commit(state: EditorState, doc: DrawingDocument, extra: Partial<EditorState> = {}): EditorState {
-  if (doc === state.doc) return { ...state, ...extra };
+/** Shapes whose geometry object changed between two documents. */
+function changedShapeIds(base: DrawingDocument, next: DrawingDocument): Set<ShapeId> {
+  const before = new Map(base.shapes.map((x) => [x.id, x]));
+  return new Set(next.shapes.filter((x) => before.get(x.id) !== x).map((x) => x.id));
+}
+
+/**
+ * After a geometry edit, re-satisfy the driving constraints that involve the edited
+ * objects (the edited objects are preferred to stay where the user put them).
+ * If that is impossible the user's edit is kept as-is and the constraints are reported
+ * as not satisfied – geometry is never silently distorted to fit.
+ */
+export function enforceConstraints(base: DrawingDocument, next: DrawingDocument): { doc: DrawingDocument; note: string | null } {
+  const changed = changedShapeIds(base, next);
+  if (changed.size === 0) return { doc: next, note: null };
+  const involved = next.constraints.some((c) => !c.suppressed && constraintShapeIds(c).some((id) => changed.has(id)));
+  if (!involved) return { doc: next, note: null };
+  const r = solveConstraints(next, { preferred: changed });
+  if (!r.ok) return { doc: next, note: `⚠ ${r.unsatisfied.length} constraint${r.unsatisfied.length === 1 ? '' : 's'} not satisfied – ${r.reason ?? 'conflict'}` };
+  const others = r.moved.filter((id) => !changed.has(id)).length;
+  const adjusted = r.moved.some((id) => changed.has(id));
+  return {
+    doc: r.doc,
+    note: others || adjusted ? `constraints applied${others ? ` (${others} other object${others === 1 ? '' : 's'} adjusted)` : ''}` : null,
+  };
+}
+
+/** New objects without a layer are placed on the active layer. */
+function stampLayer(prev: DrawingDocument, next: DrawingDocument, layerId: LayerId): DrawingDocument {
+  const known = new Set(allItemIds(prev));
+  const fix = <T extends { id: string; layerId?: string }>(x: T): T => (known.has(x.id) || x.layerId ? x : { ...x, layerId });
+  const shapes = next.shapes.map(fix);
+  const dimensions = next.dimensions.map(fix);
+  const same = shapes.every((x, i) => x === next.shapes[i]) && dimensions.every((x, i) => x === next.dimensions[i]);
+  return same ? next : { ...next, shapes, dimensions };
+}
+
+/** Reason new objects cannot be created on the active layer (null = fine). */
+function activeLayerProblem(state: EditorState): string | null {
+  const l = layerOf(state.doc, { layerId: state.activeLayerId });
+  if (l.locked) return `Active layer "${l.name}" is locked – unlock it or choose another layer`;
+  if (!l.visible) return `Active layer "${l.name}" is hidden – show it or choose another layer`;
+  return null;
+}
+
+/**
+ * Commit a new document as ONE undo step. Guards: objects on locked layers can never be
+ * changed; new objects go to the active layer (refused if it is locked/hidden); driving
+ * constraints are re-applied after geometry edits.
+ */
+function commit(state: EditorState, proposed: DrawingDocument, extra: Partial<EditorState> = {}): EditorState {
+  if (proposed === state.doc) return { ...state, ...extra };
+  const known = new Set(allItemIds(state.doc));
+  const createsUnlayered = [...proposed.shapes, ...proposed.dimensions].some((x) => !known.has(x.id) && !x.layerId);
+  if (createsUnlayered) {
+    const problem = activeLayerProblem(state);
+    if (problem) return { ...state, message: `⚠ ${problem}` };
+  }
+  const stamped = stampLayer(state.doc, proposed, state.activeLayerId);
+  const violation = lockedViolation(state.doc, stamped);
+  if (violation) return { ...state, message: `⚠ ${violation}` };
+  const { doc, note } = enforceConstraints(state.doc, stamped);
+  const message = extra.message ?? state.message;
   return {
     ...state,
     ...extra,
+    message: note ? `${message} – ${note}` : message,
     doc,
+    selection: keepExisting(doc, extra.selection ?? state.selection),
     past: [...state.past, state.doc].slice(-HISTORY_LIMIT),
     future: [],
   };
 }
 
+/** Selection may only contain items that exist and are editable (visible, unlocked layer). */
 const keepExisting = (doc: DrawingDocument, ids: readonly ShapeId[]) => {
-  const all = new Set(allItemIds(doc));
-  return ids.filter((id) => all.has(id));
+  const ok = new Set([
+    ...doc.shapes.filter((x) => isEditable(doc, x)).map((x) => x.id),
+    ...doc.dimensions.filter((x) => isEditable(doc, x)).map((x) => x.id),
+    ...doc.constraints.map((c) => c.id),
+  ]);
+  return ids.filter((id) => ok.has(id));
 };
+
+export const displayPrefsOf = (v: ViewSettings): DisplayPrefs => ({
+  showGrid: v.showGrid,
+  gridSpacingMm: v.gridSpacingMm,
+  gridSnap: v.snapEnabled,
+  gridSnapStepMm: v.snapStepMm,
+  objectSnap: v.objectSnap,
+  osnap: v.osnap,
+});
+
+export const projectSettingsOf = (s: EditorState): ProjectSettings => ({ activeLayerId: s.activeLayerId, display: displayPrefsOf(s.view) });
 
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
@@ -196,7 +292,14 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
           : keepExisting(state.doc, [...state.selection, action.id]),
       };
     case 'selectAll':
-      return { ...state, selection: allItemIds(state.doc) };
+      return {
+        ...state,
+        selection: [...state.doc.shapes, ...state.doc.dimensions].filter((x) => isEditable(state.doc, x)).map((x) => x.id),
+      };
+    case 'setActiveLayer': {
+      const l = state.doc.layers.find((x) => x.id === action.id);
+      return l ? { ...state, activeLayerId: l.id, message: `Active layer: ${l.name}${l.locked ? ' (locked)' : ''}${!l.visible ? ' (hidden)' : ''}` } : state;
+    }
     case 'addShapes':
       if (action.shapes.length === 0) return state;
       return commit(state, addShapes(state.doc, action.shapes), {
@@ -215,8 +318,12 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case 'deleteSelection': {
       if (state.selection.length === 0) return state;
       const res = removeItems(state.doc, state.selection);
-      const n = res.removedShapes + res.removedDimensions - res.dependentDimensions;
-      const extra = res.dependentDimensions ? ` and ${res.dependentDimensions} dependent dimension${res.dependentDimensions === 1 ? '' : 's'}` : '';
+      const n = res.removedShapes + res.removedDimensions - res.dependentDimensions + res.removedConstraints - res.dependentConstraints;
+      const deps = [
+        res.dependentDimensions ? `${res.dependentDimensions} dependent dimension${res.dependentDimensions === 1 ? '' : 's'}` : '',
+        res.dependentConstraints ? `${res.dependentConstraints} dependent constraint${res.dependentConstraints === 1 ? '' : 's'}` : '',
+      ].filter(Boolean);
+      const extra = deps.length ? ` and ${deps.join(' and ')}` : '';
       return commit(state, res.doc, {
         selection: [],
         message: `Deleted ${n} object${n === 1 ? '' : 's'}${extra}`,
@@ -225,14 +332,20 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case 'beginEdit':
       return { ...state, editBase: state.doc };
     case 'previewShapes':
-      if (!state.editBase) return state;
-      return { ...state, doc: replaceShapes(state.doc, action.shapes) };
-    case 'previewDocument':
-      return state.editBase ? { ...state, doc: action.doc } : state;
+    case 'previewDocument': {
+      const base = state.editBase;
+      if (!base) return state;
+      // Each preview starts from the state before the drag, so constraint solving never accumulates.
+      const proposed = action.type === 'previewShapes' ? replaceShapes(base, action.shapes) : action.doc;
+      if (lockedViolation(base, proposed)) return state;
+      return { ...state, doc: enforceConstraints(base, proposed).doc };
+    }
     case 'endEdit': {
       const base = state.editBase;
       if (!base) return state;
       if (base === state.doc) return { ...state, editBase: null };
+      const violation = lockedViolation(base, state.doc);
+      if (violation) return { ...state, doc: base, editBase: null, message: `⚠ ${violation}` };
       return {
         ...state,
         editBase: null,
@@ -293,9 +406,24 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         message: 'New drawing',
       };
     }
-    case 'loadDocument':
+    case 'loadDocument': {
+      const set = action.settings;
+      const view = set
+        ? {
+            ...state.view,
+            showGrid: set.display.showGrid,
+            gridSpacingMm: set.display.gridSpacingMm,
+            snapEnabled: set.display.gridSnap,
+            snapStepMm: set.display.gridSnapStepMm,
+            objectSnap: set.display.objectSnap,
+            osnap: set.display.osnap,
+          }
+        : state.view;
       return {
         ...state,
+        view,
+        activeLayerId: set && action.doc.layers.some((l) => l.id === set.activeLayerId) ? set.activeLayerId : action.doc.layers[0].id,
+        sourceVersion: action.sourceVersion ?? null,
         doc: action.doc,
         savedDoc: action.doc,
         selection: [],
@@ -304,10 +432,11 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         editBase: null,
         filePath: action.path,
         fileName: action.name,
-        message: `Opened ${action.name}`,
+        message: action.message ?? `Opened ${action.name}`,
       };
+    }
     case 'markSaved':
-      return { ...state, savedDoc: state.doc, filePath: action.path, fileName: action.name, message: `Saved ${action.name}` };
+      return { ...state, savedDoc: state.doc, filePath: action.path, fileName: action.name, sourceVersion: null, message: `Saved ${action.name}` };
     case 'setMessage':
       return { ...state, message: action.message };
   }

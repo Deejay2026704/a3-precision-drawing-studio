@@ -5,7 +5,8 @@ import { moveShape } from '../src/model/operations';
 import { vec } from '../src/geometry/vec';
 
 const run = (actions: EditorAction[], s: EditorState = createInitialState()) => actions.reduce(editorReducer, s);
-const line = createLine('l1', vec(0, 0), vec(100, 0));
+// Objects carry their layer (Milestone 3): new objects land on the active (default) layer.
+const line = { ...createLine('l1', vec(0, 0), vec(100, 0)), layerId: 'layer-0' };
 
 describe('editor state (single source of truth + undo)', () => {
   it('adding a shape selects it and marks the document dirty', () => {

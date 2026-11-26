@@ -5,10 +5,11 @@ import type { Vec2 } from '../geometry/vec';
 import { duplicateShape } from './operations';
 import { shapeBounds } from './shapes';
 import { copyDimensions, dimensionShapeIds } from './dimensions';
-import type { Dimension, DrawingDocument, Shape, ShapeId } from './types';
+import { constraintShapeIds } from './layers';
+import { DEFAULT_LAYER, type Dimension, type DrawingDocument, type Shape, type ShapeId } from './types';
 
 export function createEmptyDocument(): DrawingDocument {
-  return { page: A3_LANDSCAPE, scale: SCALE_1_1, shapes: [], dimensions: [] };
+  return { page: A3_LANDSCAPE, scale: SCALE_1_1, shapes: [], dimensions: [], layers: [DEFAULT_LAYER], constraints: [] };
 }
 
 export const findShape = (doc: DrawingDocument, id: ShapeId): Shape | undefined => doc.shapes.find((s) => s.id === id);
@@ -68,7 +69,11 @@ export function getDimensions(doc: DrawingDocument, ids: readonly ShapeId[]): Di
   return doc.dimensions.filter((d) => set.has(d.id));
 }
 
-export const allItemIds = (doc: DrawingDocument): ShapeId[] => [...doc.shapes.map((s) => s.id), ...doc.dimensions.map((d) => d.id)];
+export const allItemIds = (doc: DrawingDocument): ShapeId[] => [
+  ...doc.shapes.map((s) => s.id),
+  ...doc.dimensions.map((d) => d.id),
+  ...doc.constraints.map((c) => c.id),
+];
 
 export function addDimensions(doc: DrawingDocument, dims: readonly Dimension[]): DrawingDocument {
   return { ...doc, dimensions: [...doc.dimensions, ...dims] };
@@ -86,6 +91,9 @@ export interface RemoveResult {
   removedDimensions: number;
   /** Dimensions removed only because geometry they were linked to was deleted. */
   dependentDimensions: number;
+  removedConstraints: number;
+  /** Constraints removed only because geometry they referenced was deleted. */
+  dependentConstraints: number;
 }
 
 /**
@@ -110,11 +118,26 @@ export function removeItems(doc: DrawingDocument, ids: readonly ShapeId[]): Remo
     }
     return true;
   });
+  let removedConstraints = 0;
+  let dependentConstraints = 0;
+  const constraints = doc.constraints.filter((c) => {
+    if (set.has(c.id)) {
+      removedConstraints++;
+      return false;
+    }
+    if (constraintShapeIds(c).some((id) => removedShapeIds.has(id))) {
+      dependentConstraints++;
+      return false;
+    }
+    return true;
+  });
   return {
-    doc: { ...doc, shapes, dimensions },
+    doc: { ...doc, shapes, dimensions, constraints },
     removedShapes: removedShapeIds.size,
     removedDimensions: direct + dependent,
     dependentDimensions: dependent,
+    removedConstraints: removedConstraints + dependentConstraints,
+    dependentConstraints,
   };
 }
 

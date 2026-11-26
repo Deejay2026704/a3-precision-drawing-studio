@@ -1,4 +1,4 @@
-# Test Plan: Milestones 1 and 2
+# Test Plan: Milestones 1, 2 and 3
 
 There are three levels of testing:
 
@@ -41,6 +41,20 @@ Last full result: **19 files, 176 tests, all passing** (77 M1 + 99 M2).
 | Undo / redo | `tests/undoRedo.test.ts` | one undo step + exact undo/redo for trim (end, split), extend, offset, mirror (copy, replace), add dimension, dimension grip/style; delete with dependents; long mixed sequence fully undone and redone; refused op leaves history untouched |
 | Tool workflows | `tests/toolSession.test.ts` | click sequences with real snapping for every M2 tool; linked vs fixed anchors; wrong picks refused; previews never modify the document |
 | Storage | `tests/storage.test.ts` | version 2 round trip of all dimension kinds; **version 1 files still open**; malformed dimensions rejected |
+
+### Milestone 3 unit tests (added)
+
+Last full result: **24 files, 243 tests, all passing**.
+
+| Area | File | What is verified |
+| --- | --- | --- |
+| Constraints | `tests/constraints.test.ts` | every type solved exactly; minimum change; a closed rectangle system (11 constraints); conflicts refused with geometry untouched (H+V collapse, angle vs horizontal, two pins); duplicates, wrong kinds, same object twice, zero-length, zero value refused; redundant-consistent accepted; locked geometry never moved; status from geometry (unsatisfied after edit, broken when geometry missing); suppress/unsuppress; value edits; preferred objects stay put; radii held exactly unless required; untouched objects not re-created |
+| Layers | `tests/layers.test.ts` | create/rename (unique, non-empty), reorder & paint order, assign incl. dimensions, "By layer" colour; hidden ⇒ not visible/editable; locked ⇒ visible not editable; default layer for legacy objects; `lockedViolation` blocks change/delete/re-layer; assign to/from locked refused; safe delete (empty, last layer, refuse non-empty, reassign, delete objects + dependents) |
+| Store guards | `tests/editorM3.test.ts` | locked objects not selectable, not changeable by update/commit/drag; unlock; lock/hide drops selection; active layer; drawing on locked/hidden layer refused; constraints applied on edits and during drags (one undo step); dependent constraints deleted; settings saved/restored; dirty flag; migrated-file source version |
+| Files | `tests/storage.test.ts` | v3 round trip of everything incl. settings; byte-identical re-save; **real v1 and v2 fixture files** migrate with geometry and linked dimension values intact; migrated re-save; empty / truncated / non-JSON / other format / newer version / bad units; exact error paths; structural errors; repaired-and-reported issues |
+| Export | `tests/exportSvg.test.ts` | **hidden layers excluded**, locked layers included with layer colour, A3 size in mm and scale/Y-flip, dimension text, no constraint markers, all-hidden ⇒ empty |
+| Atomic save | `tests/atomicWrite.test.ts` | create/replace; a failed save leaves the original untouched with no temp file; missing folder |
+| Tools | `tests/toolSession.test.ts` | coincident and fixed-position point tools; modify tools refuse non-editable objects |
 
 ## 2. End-to-end smoke test: `npm run e2e`
 
@@ -128,6 +142,32 @@ unchanged Milestone 1 suite (64/64) each time. Screenshots `docs/screenshots/m2-
   the linked dimension still measuring the edited line.
 * No renderer console errors.
 
+### Milestone 3 end-to-end suite: `tests-e2e/milestone3.mjs`
+
+Last result: **78 checks passed, 0 failed** — 3 consecutive runs, together with the M1
+(64/64) and M2 (62/62) suites each time. Screenshots `docs/screenshots/m3-*.png`.
+
+* **Layout:** the canvas never overlaps the sidebar after visiting every ribbon tab.
+* **Layers:** create, rename, active layer receives new objects, layer colour drives "By
+  layer" objects, hide (not drawn, not selectable by Select All), lock (not clickable,
+  excluded from Select All, drawing on it refused, trim cannot change it; works after
+  unlocking), move objects via Properties, reorder, delete with dialog (Cancel / move
+  objects / delete objects) and undo, **SVG export excludes the hidden layer**.
+* **Constraints:** buttons disabled with reasons; Horizontal, Parallel, Fixed length
+  (marker with value, select marker, labelled *Driving*, edit to 150 mm exactly, suppress/
+  unsuppress), conflicting Fixed angle value refused with geometry and value unchanged,
+  Coincident and Fixed position tools, an edit breaking a constraint is corrected with a
+  message, grip drag keeps constraints and the pinned point, Tangent exact with radius
+  unchanged, delete constraint + undo, dimensions labelled *Reference*.
+* **Files:** unsaved badge; Save As writes v3 with layers (name/lock/colour), constraints,
+  dimensions, orientation and display preferences; New on a modified drawing asks
+  (Cancel keeps it, Don't save clears); reopen restores everything incl. preferences and
+  active layer, unmodified, constraints satisfied; re-save byte-identical; a **Milestone 1
+  file** opens with an upgrade notice, Save asks before upgrading (Cancel leaves the file
+  byte-identical; Upgrade writes v3); malformed (exact path in the error), newer-version
+  and truncated files are refused with the open drawing untouched and the bad file
+  unmodified; no console errors.
+
 ### Additional one-off checks performed
 
 * `npm run dev` starts Vite and Electron and the window stays up.
@@ -157,3 +197,7 @@ Run `npm install` and then `npm run dev`, and check each item:
 - [ ] (M2) Draw a line by clicking two points; draw one "by numbers"
 - [ ] (M2) Dimension a line, then change the line length: the dimension updates
 - [ ] (M2) Trim, extend, offset and mirror; Ctrl+Z / Ctrl+Y after each
+- [ ] (M3) Create layers, hide/lock them; locked objects cannot be clicked; delete a layer with objects (both options)
+- [ ] (M3) Constrain two lines parallel, then drag one: the other follows; try a conflicting value: refused
+- [ ] (M3) Open a Milestone 1/2 file: upgrade notice; Save asks before upgrading
+- [ ] (M3) Export SVG and open it in a browser: hidden layers absent, true size in mm

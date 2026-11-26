@@ -6,14 +6,19 @@ import { duplicateItems, getDimensions, getShapes, replaceDimensions, replaceSha
 import { moveDimension } from '../model/dimensions';
 import { createIdGenerator } from '../model/ids';
 import { moveShape } from '../model/operations';
-import { DocumentFormatError, FILE_EXTENSION, parseDocument, serializeDocument } from '../storage/documentStorage';
+import { addConstraint, constraintFromSelection } from '../model/constraints';
+import type { ConstraintKind } from '../model/types';
+import { DocumentFormatError, FILE_EXTENSION, FILE_FORMAT_VERSION, parseProject, serializeProject } from '../storage/documentStorage';
+import { exportSvg } from '../storage/exportSvg';
+import { useDialog } from './Dialog';
+import { LayersPanel } from './LayersPanel';
 import { baseName, getFileService } from '../storage/fileService';
 import { DrawingCanvas } from './DrawingCanvas';
 import { FileMenu, type FileCommands } from './FileMenu';
 import { PropertiesPanel } from './PropertiesPanel';
 import { Ribbon, type EditCommands, type RibbonTab, type ViewCommands } from './Ribbon';
 import { StatusBar } from './StatusBar';
-import { createInitialState, editorReducer, isDirty, type ToolId } from './state/editorReducer';
+import { createInitialState, editorReducer, isDirty, projectSettingsOf, type ToolId } from './state/editorReducer';
 
 export const APP_TITLE = 'A3 Precision Drawing Studio';
 const DUPLICATE_OFFSET_PAPER_MM = 10;
@@ -107,58 +112,176 @@ export function App() {
   };
 
   // ---- file commands ----
-  const confirmDiscard = () => !isDirty(stateRef.current) || window.confirm('The drawing has unsaved changes. Discard them?');
+  const [dialog, ask] = useDialog();
 
-  const saveAs = async () => {
+  /** Serialised project: document + active layer + display preferences. */
+  const projectText = () => serializeProject(stateRef.current.doc, projectSettingsOf(stateRef.current));
+
+  /** Returns true if the project was written. Never throws. */
+  const saveAs = async (): Promise<boolean> => {
     const s = stateRef.current;
     try {
       const name = s.fileName.endsWith(`.${FILE_EXTENSION}`) ? s.fileName : `${s.fileName}.${FILE_EXTENSION}`;
-      const path = await files.saveAs(serializeDocument(s.doc), name);
-      if (path) dispatch({ type: 'markSaved', path, name: baseName(path) });
+      const path = await files.saveAs(projectText(), name);
+      if (!path) return false;
+      dispatch({ type: 'markSaved', path, name: baseName(path) });
+      return true;
     } catch (err) {
-      dispatch({ type: 'setMessage', message: `Save failed: ${(err as Error).message}` });
+      await ask({
+        title: 'Save failed',
+        message: `The drawing could not be saved: ${(err as Error).message}`,
+        detail: ['Nothing was overwritten. Your drawing is still open and unchanged.'],
+        buttons: [{ id: 'ok', label: 'OK', kind: 'primary' }],
+        cancelId: 'ok',
+        testId: 'dialog-error',
+      });
+      return false;
     }
   };
 
+  const save = async (): Promise<boolean> => {
+    const s = stateRef.current;
+    if (!s.filePath || !files.canSaveInPlace) return saveAs();
+    if (s.sourceVersion !== null && s.sourceVersion < FILE_FORMAT_VERSION) {
+      const a = await ask({
+        title: 'Upgrade project file?',
+        message: `"${s.fileName}" was created by an earlier version (format ${s.sourceVersion}). Saving will upgrade it to format ${FILE_FORMAT_VERSION}, which earlier versions of the application cannot open.`,
+        buttons: [
+          { id: 'upgrade-save', label: 'Upgrade and save', kind: 'primary' },
+          { id: 'saveas', label: 'Save as a new file…' },
+          { id: 'cancel', label: 'Cancel' },
+        ],
+        cancelId: 'cancel',
+        testId: 'dialog-upgrade',
+      });
+      if (a.button === 'cancel') return false;
+      if (a.button === 'saveas') return saveAs();
+    }
+    try {
+      const path = await files.save(s.filePath, projectText());
+      dispatch({ type: 'markSaved', path, name: baseName(path) });
+      return true;
+    } catch (err) {
+      await ask({
+        title: 'Save failed',
+        message: `The drawing could not be saved: ${(err as Error).message}`,
+        detail: ['The file on disk was not changed (saves are written to a temporary file first).', 'Try File ▸ Save As to save elsewhere.'],
+        buttons: [{ id: 'ok', label: 'OK', kind: 'primary' }],
+        cancelId: 'ok',
+        testId: 'dialog-error',
+      });
+      return false;
+    }
+  };
+
+  /** Before replacing a modified drawing: Save / Don't save / Cancel. Resolves true to continue. */
+  const confirmDiscard = async (action: string): Promise<boolean> => {
+    if (!isDirty(stateRef.current)) return true;
+    const a = await ask({
+      title: 'Unsaved changes',
+      message: `Save changes to "${stateRef.current.fileName}" before ${action}?`,
+      buttons: [
+        { id: 'save', label: 'Save', kind: 'primary' },
+        { id: 'discard', label: "Don't save", kind: 'danger' },
+        { id: 'cancel', label: 'Cancel' },
+      ],
+      cancelId: 'cancel',
+      testId: 'dialog-unsaved',
+    });
+    if (a.button === 'cancel') return false;
+    if (a.button === 'save') return save();
+    return true;
+  };
+
   const fileCommands: FileCommands = {
-    newDrawing: () => {
-      if (!confirmDiscard()) return;
+    newDrawing: async () => {
+      if (!(await confirmDiscard('creating a new drawing'))) return;
       dispatch({ type: 'newDocument' });
       fit();
     },
     open: async () => {
-      if (!confirmDiscard()) return;
+      if (!(await confirmDiscard('opening another drawing'))) return;
+      let res: { path: string; content: string } | null;
       try {
-        const res = await files.open();
-        if (!res) return;
-        const doc = parseDocument(res.content);
-        dispatch({ type: 'loadDocument', doc, path: res.path, name: baseName(res.path) });
+        res = await files.open();
+      } catch (err) {
+        dispatch({ type: 'setMessage', message: `Could not read file: ${(err as Error).message}` });
+        return;
+      }
+      if (!res) return;
+      try {
+        const loaded = parseProject(res.content);
+        dispatch({
+          type: 'loadDocument',
+          doc: loaded.doc,
+          path: res.path,
+          name: baseName(res.path),
+          settings: loaded.settings,
+          sourceVersion: loaded.sourceVersion,
+          message: `Opened ${baseName(res.path)}${loaded.sourceVersion < FILE_FORMAT_VERSION ? ` (upgraded from format ${loaded.sourceVersion})` : ''}`,
+        });
         fit();
+        if (loaded.warnings.length) {
+          await ask({
+            title: 'Opened with notes',
+            message: `"${baseName(res.path)}" was opened. Please review:`,
+            detail: loaded.warnings,
+            buttons: [{ id: 'ok', label: 'OK', kind: 'primary' }],
+            cancelId: 'ok',
+            testId: 'dialog-warnings',
+          });
+        }
       } catch (err) {
         const msg = err instanceof DocumentFormatError ? err.message : (err as Error).message;
         dispatch({ type: 'setMessage', message: `Could not open file: ${msg}` });
-        window.alert(`Could not open file:\n${msg}`);
+        await ask({
+          title: 'Cannot open file',
+          message: `"${baseName(res.path)}" could not be opened.`,
+          detail: [msg, 'Your current drawing has not been changed.'],
+          buttons: [{ id: 'ok', label: 'OK', kind: 'primary' }],
+          cancelId: 'ok',
+          testId: 'dialog-error',
+        });
       }
     },
     save: async () => {
+      await save();
+    },
+    saveAs: async () => {
+      await saveAs();
+    },
+    exportSvg: async () => {
       const s = stateRef.current;
-      if (!s.filePath || !files.canSaveInPlace) return saveAs();
+      const name = s.fileName.replace(/\.a3d$/i, '') + '.svg';
       try {
-        const path = await files.save(s.filePath, serializeDocument(s.doc));
-        dispatch({ type: 'markSaved', path, name: baseName(path) });
+        const path = await files.exportSvg(exportSvg(s.doc), name);
+        if (path) dispatch({ type: 'setMessage', message: `Exported ${baseName(path)} (visible layers only)` });
       } catch (err) {
-        dispatch({ type: 'setMessage', message: `Save failed: ${(err as Error).message}` });
+        dispatch({ type: 'setMessage', message: `⚠ Export failed: ${(err as Error).message}` });
       }
     },
-    saveAs,
     exit: () => (window.a3Studio ? window.a3Studio.quit() : window.close()),
   };
+
+  // ---- constraints from the current selection ----
+  const constrain = (kind: ConstraintKind) => {
+    const s = stateRef.current;
+    const c = constraintFromSelection(kind, getShapes(s.doc, s.selection), newId());
+    if (typeof c === 'string') return dispatch({ type: 'setMessage', message: `⚠ ${c}` });
+    const r = addConstraint(s.doc, c);
+    if (!r.ok) return dispatch({ type: 'setMessage', message: `⚠ ${r.message}` });
+    dispatch({ type: 'commitDocument', doc: r.doc, message: r.message });
+  };
+
+  const dialogOpenRef = useRef(false);
+  dialogOpenRef.current = dialog !== null;
 
   // ---- keyboard shortcuts ----
   const handlersRef = useRef({ fileCommands, edit });
   handlersRef.current = { fileCommands, edit };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (dialogOpenRef.current) return; // a modal dialog owns the keyboard
       const { fileCommands: f, edit: ed } = handlersRef.current;
       const typing = isTypingTarget(e.target);
       const ctrl = e.ctrlKey || e.metaKey;
@@ -171,7 +294,7 @@ export function App() {
         return;
       }
       if (ctrl && key === 'o') return e.preventDefault(), void f.open();
-      if (ctrl && key === 'n') return e.preventDefault(), f.newDrawing();
+      if (ctrl && key === 'n') return e.preventDefault(), void f.newDrawing();
       if (typing) return;
       if (ctrl && key === 'z') return e.preventDefault(), e.shiftKey ? ed.redo() : ed.undo();
       if (ctrl && key === 'y') return e.preventDefault(), ed.redo();
@@ -223,16 +346,21 @@ export function App() {
           {state.fileName}
           {dirty ? ' •' : ''}
         </span>
+        {dirty && (
+          <span className="unsaved-badge" data-testid="unsaved-indicator" title="This drawing has changes that are not saved yet (Ctrl+S)">
+            Unsaved changes
+          </span>
+        )}
       </header>
       <nav className="tabs">
         <FileMenu commands={fileCommands} />
-        {(['home', 'draw', 'annotate', 'view'] as const).map((t) => (
+        {(['home', 'draw', 'annotate', 'constrain', 'view'] as const).map((t) => (
           <button key={t} className={`tab${tab === t ? ' active' : ''}`} data-testid={`tab-${t}`} onClick={() => setTab(t)}>
             {t[0].toUpperCase() + t.slice(1)}
           </button>
         ))}
       </nav>
-      <Ribbon tab={tab} state={state} dispatch={dispatch} zoom={viewport.zoom} view={view} edit={edit} />
+      <Ribbon tab={tab} state={state} dispatch={dispatch} zoom={viewport.zoom} view={view} edit={edit} constrain={constrain} />
       <main className="main">
         <DrawingCanvas
           state={state}
@@ -245,8 +373,12 @@ export function App() {
           onFeedback={setFeedback}
           newId={newId}
         />
-        <PropertiesPanel state={state} dispatch={dispatch} newId={newId} />
+        <div className="sidebar">
+          <LayersPanel state={state} dispatch={dispatch} ask={ask} newId={newId} />
+          <PropertiesPanel state={state} dispatch={dispatch} newId={newId} />
+        </div>
       </main>
+      {dialog}
       <StatusBar state={state} dispatch={dispatch} cursor={cursor} feedback={feedback} zoom={viewport.zoom} view={view} />
     </div>
   );

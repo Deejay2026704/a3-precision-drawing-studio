@@ -9,6 +9,7 @@ export interface A3StudioApi {
   openDrawing(): Promise<OpenFileResult | null>;
   saveDrawing(path: string, content: string): Promise<string>;
   saveDrawingAs(content: string, suggestedName: string): Promise<string | null>;
+  exportSvg(content: string, suggestedName: string): Promise<string | null>;
   setDirty(dirty: boolean): void;
   quit(): void;
 }

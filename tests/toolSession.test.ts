@@ -93,3 +93,37 @@ describe('tool workflows (click sequences with real snapping)', () => {
     expect(tp.removed).toEqual([[vec(60, 0), vec(100, 0)]]);
   });
 });
+
+describe('Milestone 3: constraint tools and locked layers in tool workflows', () => {
+  const X = createLine('X', vec(10, 10), vec(50, 10));
+  const Y = createLine('Y', vec(52, 13), vec(80, 40));
+  const d2: DrawingDocument = { ...createEmptyDocument(), shapes: [X, Y] };
+
+  it('coincident tool: two point picks join the points exactly', () => {
+    let s = newSession('con-coincident');
+    let step = toolClick(s, { ...base, doc: d2, raw: vec(50.3, 10.2), point: vec(50.3, 10.2), snap: null });
+    expect(step.kind).toBe('continue');
+    s = step.session;
+    step = toolClick(s, { ...base, doc: d2, raw: vec(52.2, 12.8), point: vec(52.2, 12.8), snap: null });
+    expect(step.kind).toBe('commit');
+    if (step.kind !== 'commit') return;
+    const [x, y] = step.doc.shapes as LineShape[];
+    expect(Math.hypot(x.end.x - y.start.x, x.end.y - y.start.y)).toBeLessThan(1e-6);
+  });
+
+  it('fixed-position tool pins a point where it is; picking empty space is refused', () => {
+    const step = toolClick(newSession('con-fixed-position'), { ...base, doc: d2, raw: vec(10.2, 9.9), point: vec(10.2, 9.9), snap: null });
+    expect(step.kind === 'commit' && step.doc.constraints[0]).toMatchObject({ kind: 'fixed-position', x: 10, y: 10 });
+    expect(toolClick(newSession('con-fixed-position'), { ...base, doc: d2, raw: vec(200, 200), point: vec(200, 200), snap: null }).kind).toBe('error');
+  });
+
+  it('modify tools refuse objects that are not editable (locked/hidden layer)', () => {
+    const cross = createLine('Z', vec(30, 0), vec(30, 20));
+    const doc3: DrawingDocument = { ...createEmptyDocument(), shapes: [X, cross] };
+    const locked = (sh: { id: string }) => sh.id !== 'X';
+    const r = toolClick(newSession('trim'), { ...base, doc: doc3, raw: vec(45, 10.1), point: vec(45, 10.1), snap: null, canEdit: locked });
+    expect(r.kind).toBe('error');
+    const o = toolClick(newSession('offset'), { ...base, doc: doc3, raw: vec(45, 10.1), point: vec(45, 10.1), snap: null, canEdit: locked });
+    expect(o.kind).toBe('error');
+  });
+});

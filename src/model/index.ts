@@ -9,3 +9,5 @@ export * from './anchors';
 export * from './snap';
 export * from './dimensions';
 export * from './modify';
+export * from './layers';
+export * from './constraints';

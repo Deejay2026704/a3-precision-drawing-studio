@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { writeFileAtomic } from './atomicWrite';
 
 const APP_TITLE = 'A3 Precision Drawing Studio';
 const FILE_FILTERS = [
@@ -69,15 +70,27 @@ ipcMain.handle('file:open', async () => {
 });
 
 ipcMain.handle('file:save', async (_e, filePath: string, content: string) => {
-  await fs.writeFile(filePath, content, 'utf8');
+  await writeFileAtomic(filePath, content);
   return filePath;
+});
+
+ipcMain.handle('file:exportSvg', async (_e, content: string, suggestedName: string) => {
+  if (!mainWindow) return null;
+  const res = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export SVG',
+    defaultPath: suggestedName,
+    filters: [{ name: 'SVG image', extensions: ['svg'] }],
+  });
+  if (res.canceled || !res.filePath) return null;
+  await writeFileAtomic(res.filePath, content);
+  return res.filePath;
 });
 
 ipcMain.handle('file:saveAs', async (_e, content: string, suggestedName: string) => {
   if (!mainWindow) return null;
   const res = await dialog.showSaveDialog(mainWindow, { title: 'Save drawing as', defaultPath: suggestedName, filters: FILE_FILTERS });
   if (res.canceled || !res.filePath) return null;
-  await fs.writeFile(res.filePath, content, 'utf8');
+  await writeFileAtomic(res.filePath, content);
   return res.filePath;
 });
 

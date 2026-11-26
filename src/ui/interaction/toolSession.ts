@@ -12,20 +12,25 @@ import { extendLine, mirrorShape, mirrorShapes, offsetShape, trimLine, trimPrevi
 import type { SnapResult } from '../../model/snap';
 import { createLine } from '../../model/shapes';
 import type { DimAnchor, Dimension, DimensionStyle, DrawingDocument, Shape, ShapeId, ShapeKind } from '../../model/types';
-import type { DimensionToolId, ModifyToolId } from '../state/editorReducer';
+import type { ConstraintToolId, DimensionToolId, ModifyToolId } from '../state/editorReducer';
+import { addConstraint } from '../../model/constraints';
+import { shapeKeyPoints } from '../../model/anchors';
+import type { PointRef } from '../../model/types';
 
 /**
  * Click-driven tools (modify + dimension) as a pure state machine.
  * The canvas feeds it snapped clicks; it returns either "continue" (with a prompt),
  * a document to commit (one undo step), or a refusal message. No DOM, no React.
  */
-export type SessionTool = ModifyToolId | DimensionToolId;
+export type SessionTool = ModifyToolId | DimensionToolId | ConstraintToolId;
 
 export interface ToolSession {
   readonly tool: SessionTool;
   readonly points: readonly Vec2[];
   readonly anchors: readonly DimAnchor[];
   readonly picks: readonly ShapeId[];
+  /** Points picked by the constraint tools. */
+  readonly refs?: readonly PointRef[];
 }
 
 export const newSession = (tool: SessionTool): ToolSession => ({ tool, points: [], anchors: [], picks: [] });
@@ -45,6 +50,10 @@ export interface ToolInput {
   readonly offsetDistanceMm: number;
   readonly mirrorKeepSource: boolean;
   readonly newId: () => ShapeId;
+  /** Objects that may be modified/selected (visible, unlocked layer). Default: all. */
+  readonly canEdit?: (s: Shape) => boolean;
+  /** Objects that are visible (may be measured or snapped to). Default: all. */
+  readonly canSee?: (s: Shape) => boolean;
 }
 
 export type ToolStep =
@@ -53,10 +62,11 @@ export type ToolStep =
   | { readonly kind: 'error'; readonly session: ToolSession; readonly message: string };
 
 /** Topmost shape under the cursor, optionally restricted to some kinds. */
-export function pickShape(doc: DrawingDocument, p: Vec2, tolerance: number, kinds?: readonly ShapeKind[]): Shape | null {
+export function pickShape(doc: DrawingDocument, p: Vec2, tolerance: number, kinds?: readonly ShapeKind[], allow: (s: Shape) => boolean = () => true): Shape | null {
   for (let i = doc.shapes.length - 1; i >= 0; i--) {
     const s = doc.shapes[i];
     if (kinds && !kinds.includes(s.kind)) continue;
+    if (!allow(s)) continue;
     if (distanceToShape(s, p) <= tolerance) return s;
   }
   return null;
@@ -79,21 +89,37 @@ const LINEAR: Record<string, 'aligned' | 'horizontal' | 'vertical'> = {
   'dim-vertical': 'vertical',
 };
 
+/** Nearest constrainable point (line start/end/mid, circle centre) within tolerance. */
+export function pickPointRef(doc: DrawingDocument, p: Vec2, tolerance: number, allow: (s: Shape) => boolean = () => true): PointRef | null {
+  let best: { ref: PointRef; d: number } | null = null;
+  for (const s of doc.shapes) {
+    if ((s.kind !== 'line' && s.kind !== 'circle') || !allow(s)) continue;
+    for (const kp of shapeKeyPoints(s)) {
+      if (kp.key !== 'start' && kp.key !== 'end' && kp.key !== 'mid' && kp.key !== 'center') continue;
+      const d = distance(kp.point, p);
+      if (d <= tolerance && (!best || d < best.d)) best = { ref: { shapeId: s.id, key: kp.key }, d };
+    }
+  }
+  return best?.ref ?? null;
+}
+
 export function toolClick(session: ToolSession, input: ToolInput): ToolStep {
   const { doc, raw, point, tolerance } = input;
   const reset = newSession(session.tool);
+  const canEdit = input.canEdit ?? (() => true);
+  const canSee = input.canSee ?? (() => true);
 
   switch (session.tool) {
     case 'trim':
     case 'extend': {
-      const s = pickShape(doc, raw, tolerance);
-      if (!s) return { kind: 'error', session, message: `Click on a line to ${session.tool}` };
+      const s = pickShape(doc, raw, tolerance, undefined, canEdit);
+      if (!s) return { kind: 'error', session, message: `Click on a line to ${session.tool} (objects on locked or hidden layers cannot be changed)` };
       return fromEdit(session, session.tool === 'trim' ? trimLine(doc, s.id, raw, input.newId) : extendLine(doc, s.id, raw));
     }
 
     case 'offset': {
       if (session.picks.length === 0) {
-        const s = pickShape(doc, raw, tolerance);
+        const s = pickShape(doc, raw, tolerance, undefined, canEdit);
         if (!s) return { kind: 'error', session, message: 'Click the object to offset' };
         return {
           kind: 'continue',
@@ -108,7 +134,7 @@ export function toolClick(session: ToolSession, input: ToolInput): ToolStep {
     case 'mirror': {
       const shapeIds = getShapes(doc, input.selection).map((s) => s.id);
       if (shapeIds.length === 0) {
-        const s = pickShape(doc, raw, tolerance);
+        const s = pickShape(doc, raw, tolerance, undefined, canEdit);
         if (!s) return { kind: 'error', session, message: 'Select the objects to mirror first (click them, Shift+click to add)' };
         return { kind: 'continue', session, selection: [s.id], prompt: 'Mirror: click the first point of the mirror line (Shift+click adds objects)' };
       }
@@ -138,14 +164,14 @@ export function toolClick(session: ToolSession, input: ToolInput): ToolStep {
 
     case 'dim-radius':
     case 'dim-diameter': {
-      const c = pickShape(doc, raw, tolerance, ['circle']);
+      const c = pickShape(doc, raw, tolerance, ['circle'], canSee);
       if (!c) return { kind: 'error', session, message: 'Click on a circle' };
       return fromDim(session, doc, createRadialDimension(doc, input.newId(), session.tool === 'dim-radius' ? 'radius' : 'diameter', c.id, raw, input.dimStyle), 'Dimension added');
     }
 
     case 'dim-angular': {
       if (session.picks.length < 2) {
-        const l = pickShape(doc, raw, tolerance, ['line']);
+        const l = pickShape(doc, raw, tolerance, ['line'], canSee);
         if (!l) return { kind: 'error', session, message: 'Click on a line' };
         if (session.picks[0] === l.id) return { kind: 'error', session, message: 'Pick a different second line' };
         const picks = [...session.picks, l.id];
@@ -157,6 +183,24 @@ export function toolClick(session: ToolSession, input: ToolInput): ToolStep {
         };
       }
       return fromDim(reset, doc, createAngularDimension(doc, input.newId(), session.picks[0], session.picks[1], raw, input.dimStyle), 'Dimension added');
+    }
+
+    case 'con-coincident':
+    case 'con-fixed-position': {
+      const ref = pickPointRef(doc, raw, tolerance, canSee);
+      if (!ref) return { kind: 'error', session, message: 'Click on a line end, line midpoint or circle centre' };
+      const refs = [...(session.refs ?? []), ref];
+      if (session.tool === 'con-coincident' && refs.length < 2) {
+        return { kind: 'continue', session: { ...session, refs }, prompt: 'Coincident: click the second point (on another object)' };
+      }
+      const s = doc.shapes.find((x) => x.id === ref.shapeId)!;
+      const at = shapeKeyPoints(s).find((k) => k.key === ref.key)!.point;
+      const c =
+        session.tool === 'con-coincident'
+          ? { id: input.newId(), suppressed: false, kind: 'coincident' as const, p: refs[0], q: refs[1] }
+          : { id: input.newId(), suppressed: false, kind: 'fixed-position' as const, p: ref, x: at.x, y: at.y };
+      const r = addConstraint(doc, c);
+      return r.ok ? { kind: 'commit', session: reset, doc: r.doc, selection: input.selection, message: r.message } : { kind: 'error', session: reset, message: r.message };
     }
   }
 }
@@ -178,12 +222,12 @@ export function toolPreview(session: ToolSession, input: ToolInput): ToolPreview
   const previewId = () => '__preview__';
   switch (session.tool) {
     case 'trim': {
-      const s = pickShape(doc, raw, tolerance, ['line']);
+      const s = pickShape(doc, raw, tolerance, ['line'], input.canEdit);
       const seg = s ? trimPreview(doc, s.id, raw) : null;
       return seg ? { ...EMPTY, removed: [seg], feedback: `Remove ${formatNumber(distance(seg[0], seg[1]))} mm` } : EMPTY;
     }
     case 'extend': {
-      const s = pickShape(doc, raw, tolerance, ['line']);
+      const s = pickShape(doc, raw, tolerance, ['line'], input.canEdit);
       if (!s) return EMPTY;
       const r = extendLine(doc, s.id, raw);
       if (!r.ok) return { ...EMPTY, feedback: 'No boundary' };
@@ -224,6 +268,11 @@ export function toolPreview(session: ToolSession, input: ToolInput): ToolPreview
       if (session.picks.length < 2) return EMPTY;
       const r = createAngularDimension(doc, '__preview__', session.picks[0], session.picks[1], raw, input.dimStyle);
       return r.ok ? { ...EMPTY, dimensions: [r.value] } : { ...EMPTY, feedback: r.message };
+    }
+    case 'con-coincident':
+    case 'con-fixed-position': {
+      const ref = pickPointRef(doc, raw, tolerance, input.canSee);
+      return ref ? { ...EMPTY, feedback: `${ref.key === 'center' ? 'Centre' : ref.key === 'mid' ? 'Midpoint' : ref.key === 'start' ? 'Start point' : 'End point'}` } : EMPTY;
     }
   }
 }

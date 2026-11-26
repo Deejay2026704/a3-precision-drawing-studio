@@ -1,6 +1,91 @@
 # Development Status
 
-## Milestone 2 — Precision drafting tools: **complete** (26 Nov 2026)
+## Milestone 3 — Constraints, layers, robust project files: **complete** (26 Nov 2026)
+
+Built on Milestone 2 without removing or redesigning anything. The project format moved
+to version 3 *additively*; versions 1 and 2 are migrated on open.
+
+### Constraints
+
+| Type | Supported on | Notes |
+| --- | --- | --- |
+| Horizontal, Vertical | 1 line | |
+| Coincident | line start/end/midpoint, circle centre (2 points on different objects) | point-pick tool |
+| Parallel, Perpendicular, Equal length | 2 lines | |
+| Tangent | line + circle, or 2 circles | circle–circle inside/outside chosen from the current layout |
+| Fixed length | 1 line | driving value, editable |
+| Fixed angle | 1 line (absolute angle from +X) | driving value, editable |
+| Fixed position | line end/midpoint or circle centre | x, y editable |
+
+**Not supported (no UI is shown for them):** constraints on rectangles and freehand
+polylines (they have no constrainable points in the solver); a fixed *radius/diameter*
+constraint; angle *between two lines*; symmetric, midpoint-on-line and point-on-curve
+constraints; converting a reference dimension into a driving one. Buttons are disabled
+with an explanation when the selection is not supported.
+
+Behaviour guarantees (all tested): add/edit/suppress/delete; markers coloured by
+status (satisfied / not satisfied / suppressed / broken) computed from real geometry;
+conflicting constraints or values are **refused** with the conflicting constraints named
+and the geometry untouched; a result that would collapse a line or circle is rejected;
+circle radii are held exactly unless only a size change can satisfy the constraints;
+locked/hidden geometry is never moved; edits that break constraints are re-solved with the
+edited object preferred to stay put (the user is told), or, if impossible, the edit is kept
+and the constraints are flagged red.
+
+### Layers
+
+Create, rename, delete, reorder, select (active layer), visibility, lock, display colour
+("By layer" colour for objects); assign objects/dimensions to layers. Hidden layers are not
+drawn, snapped to, selectable or exported. Locked layers are drawn and can be snapped to,
+but their objects cannot be selected or changed by any tool, numeric entry, solver or
+undoable action (enforced centrally by the store). Deleting a non-empty layer requires an
+explicit choice: move the objects to another layer, or delete them (with their dependent
+dimensions/constraints); the last layer cannot be deleted. All layer operations undo.
+
+### Project files
+
+Review of the M2 format before changing it: JSON, versions 1–2, hand-written
+validation, no migration step, direct overwrite on save, no orientation or display
+preferences stored. Milestone 3 adds: v3 schema with path-specific validation;
+v1→v2→v3 migration in memory (file untouched); refusal of newer versions; warnings for
+repaired issues (never silent); explicit page orientation, active layer and display
+preferences; **atomic saves**; confirmation before upgrading an older file on save;
+Save / Don't save / Cancel before New/Open on a modified drawing (close already
+confirms); "Unsaved changes" badge; byte-identical re-saves; SVG export (visible layers).
+
+### Defects found and fixed during Milestone 3 verification
+
+1. **Canvas overlapped the sidebar** after a wider ribbon tab had been shown: the rulers'
+   width stopped the workspace grid from shrinking, so the canvas covered the Properties
+   panel and intercepted its clicks. Fixed with `minmax(0, 1fr)` tracks and clipping;
+   regression check added (E2E).
+2. **Tangent changed circle sizes slightly** (radius 20 → 20.000013): the solver now holds
+   radii exactly in a first pass and only frees them if needed.
+3. **Floating-point noise counted as edits**: the solver re-wrote unrelated objects by
+   ~1e-15 mm and over-reported "objects adjusted"; sub-nanometre changes are now discarded.
+4. Test-harness issues (Playwright `mouse.click` ignores modifiers; key-order-sensitive
+   comparison; a duplicated test id between a dialog and its button) – fixed in the tests.
+
+### Known limitations (Milestone 3)
+
+* **No autosave / crash recovery** yet (optional in the brief; deliberately not half-built).
+* Constraint solving is numerical (damped least squares). It is robust for drawings of
+  tens of constrained objects; it has no symbolic degree-of-freedom analysis, so
+  *under*-constrained geometry is simply moved minimally and *redundant but consistent*
+  constraints are accepted silently.
+* When constraints cannot be met after a user edit, the edit is kept and the constraints
+  are flagged (rather than refusing the edit); the user resolves it (undo, suppress, delete).
+* Trim/extend still treat hidden objects as cutting edges/boundaries.
+* Constraints are not copied by Duplicate or Mirror; a trimmed (split) line keeps its
+  constraints on the first piece.
+* Display preferences are saved with the project but changing them alone does not mark
+  the project modified.
+* SVG is the only export; PDF/print is not implemented.
+* Still not verified on Windows hardware; no installer.
+
+---
+
+## Milestone 2 — Precision drafting tools (complete)
 
 All Milestone 1 features, UI layout, coordinate system (origin bottom-left, +X right,
 +Y up, real-world mm) and file format were preserved; the format was extended
@@ -140,8 +225,9 @@ Windows packaging (electron-builder NSIS), snapping to object points, a coordina
 command line (e.g. `@100<30`), dimensions, layers, print or PDF export at true scale,
 and filled shapes with inside hit-testing.
 
-## Recommended Milestone 3
+## Recommended Milestone 4
 
-Arcs (needed for trimming circles and fillets), fillet/chamfer, layers with line types,
-print / PDF export at true scale, a coordinate command line (`@100<30`), and Windows
-packaging (electron-builder NSIS) with a first run on real Windows hardware.
+Windows packaging (electron-builder NSIS installer) and a first full run on real Windows
+hardware; print / PDF export at true scale; autosave with a recovery flow; arcs (enabling
+trimming of circles, fillet/chamfer and arc constraints); radius and two-line angle
+constraints.

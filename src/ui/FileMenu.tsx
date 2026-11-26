@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
 
 export interface FileCommands {
-  newDrawing(): void;
-  open(): void;
-  save(): void;
-  saveAs(): void;
+  newDrawing(): void | Promise<void>;
+  open(): void | Promise<void>;
+  save(): void | Promise<void>;
+  saveAs(): void | Promise<void>;
+  exportSvg(): void | Promise<void>;
   exit(): void;
 }
 
@@ -28,13 +29,13 @@ export function FileMenu({ commands }: { commands: FileCommands }) {
     };
   }, [open]);
 
-  const item = (label: string, shortcut: string, run: () => void, testId: string) => (
+  const item = (label: string, shortcut: string, run: () => void | Promise<void>, testId: string) => (
     <button
       className="menu-item"
       data-testid={testId}
       onClick={() => {
         setOpen(false);
-        run();
+        void run();
       }}
     >
       <span>{label}</span>
@@ -54,6 +55,8 @@ export function FileMenu({ commands }: { commands: FileCommands }) {
           <div className="menu-sep" />
           {item('Save', 'Ctrl+S', commands.save, 'menu-save')}
           {item('Save As…', 'Ctrl+Shift+S', commands.saveAs, 'menu-save-as')}
+          <div className="menu-sep" />
+          {item('Export SVG…', '', commands.exportSvg, 'menu-export-svg')}
           <div className="menu-sep" />
           {item('Exit', 'Alt+F4', commands.exit, 'menu-exit')}
         </div>

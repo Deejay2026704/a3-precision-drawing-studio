@@ -1,0 +1,18 @@
+{
+  "format": "a3-precision-drawing",
+  "formatVersion": 2,
+  "units": "mm",
+  "page": { "widthMm": 420, "heightMm": 297 },
+  "scale": { "paper": 1, "real": 1 },
+  "shapes": [
+    { "id": "L", "kind": "line", "start": { "x": 40, "y": 60 }, "end": { "x": 160, "y": 60 }, "style": { "stroke": "#000000", "strokeWidthMm": 0.35 } },
+    { "id": "C", "kind": "circle", "center": { "x": 250.25, "y": 120.75 }, "radius": 25, "style": { "stroke": "#000000", "strokeWidthMm": 0.35 } }
+  ],
+  "dimensions": [
+    { "id": "D1", "kind": "aligned", "mode": "driven", "textShift": 0, "offset": -15,
+      "p1": { "kind": "shape", "shapeId": "L", "key": "start" }, "p2": { "kind": "shape", "shapeId": "L", "key": "end" },
+      "style": { "color": "#0b6e75", "textHeightMm": 2.5, "decimals": 2, "arrowSizeMm": 2.5, "arrowhead": "closed", "showExtensionLines": true, "extensionGapMm": 1, "extensionOvershootMm": 1.5 } },
+    { "id": "D2", "kind": "radius", "mode": "driven", "textShift": 0, "circleId": "C", "angleDeg": 45,
+      "style": { "color": "#0b6e75", "textHeightMm": 2.5, "decimals": 1, "arrowSizeMm": 2.5, "arrowhead": "tick", "showExtensionLines": true, "extensionGapMm": 1, "extensionOvershootMm": 1.5 } }
+  ]
+}

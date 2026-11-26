@@ -3,9 +3,9 @@
 A Windows desktop application for precise 2D drawing and editing on an A3 sheet.
 It is a precision drawing tool (CAD-style), **not** a publishing application.
 
-Current state: **Milestone 2** — precision drafting tools (object snaps, grid snap,
-associative dimensions, trim/extend/offset/mirror, grips, numeric creation) on top of
-Milestone 1 (shell, A3 page, drawing objects, editing, numeric input, drawing scale).
+Current state: **Milestone 3** — driving geometric constraints, layers and robust
+project files, on top of Milestone 2 (snaps, reference dimensions, trim/extend/offset/
+mirror, grips) and Milestone 1 (shell, A3 page, drawing objects, editing, scale).
 See `DEVELOPMENT_STATUS.md`.
 
 ---
@@ -22,7 +22,7 @@ npm test           # run the automated geometry/model/storage tests (Vitest)
 npm run typecheck  # TypeScript type check
 npm run build      # production build of renderer (dist/) and main process (dist-electron/)
 npm start          # launch the production build
-npm run e2e        # both end-to-end suites (M1 + M2) driving the real Electron window (needs `playwright`)
+npm run e2e        # all end-to-end suites (M1, M2, M3) driving the real Electron window (needs `playwright`)
 ```
 
 Screenshots taken from the real app during verification are in `docs/screenshots/`.
@@ -60,6 +60,11 @@ On Linux when running as root (e.g. in a container) Electron needs
 | Mirror | `M`; with objects selected (or Shift+click them in the tool) click two points on the mirror line. "Mirror keeps source" = copy |
 | Grips | select an object: filled squares are grips — line ends, polyline ends, centre/midpoint (move). Grips snap |
 | Dimensions | Annotate tab: Aligned (`D`), Horizontal, Vertical (3 clicks: point, point, placement), Angular (line, line, placement), Radius / Diameter (click a circle) |
+| Layers | Layers panel (top right): **+** new, ✎ rename (or double-click a name), ▲▼ reorder, 🗑 delete; per layer 👁 show/hide, 🔒 lock, colour. Click a row to make it the **active layer** for new objects |
+| Move objects to a layer | select them, Properties ▸ **Layer** |
+| Driving constraints | **Constrain** tab. Select a line (Horizontal, Vertical, Fixed length, Fixed angle), two lines (Parallel, Perpendicular, Equal length) or a line + circle / two circles (Tangent); or use the Coincident / Fix Position tools and click points. Disabled buttons say what to select |
+| Edit a constraint | click its purple marker: Properties shows status, value (fixed length/angle/position), Suppress, Delete |
+| Export | File ▸ Export SVG… (visible layers only, true scale in mm) |
 | Edit a dimension | click its text/line: Properties shows the measured value (read-only, *driven*), precision, text height, arrowheads, extension lines, offset, text shift. Drag it or its grips to reposition |
 
 ---
@@ -140,6 +145,34 @@ differently. Dimension definition points are links (`{shapeId, key}`), so values
 when geometry is moved, resized, trimmed or edited. Deleting geometry deletes the
 dimensions linked to it in the same undo step, and the status bar reports how many.
 
+### Milestone 3 modules
+
+| Module | Responsibility |
+| --- | --- |
+| `model/layers.ts` | layer create/rename/delete (reassign or delete objects)/reorder/visibility/lock/colour, visibility & editability rules, `lockedViolation` safety net |
+| `model/constraints.ts` | driving constraints: validation, residuals, damped weighted least-squares solver, status, add/update |
+| `storage/documentStorage.ts` | format v3 schema validation with exact error paths, v1→v2→v3 migration, settings, warnings |
+| `storage/exportSvg.ts` | SVG export of visible layers |
+| `electron/atomicWrite.ts` | atomic saves (temp file + fsync + rename) |
+| `ui/LayersPanel.tsx`, `ui/ConstraintProperties.tsx`, `ui/Dialog.tsx` | layer panel, constraint editing, modal Save/Don't save/Cancel dialogs |
+
+**Driving constraints vs reference dimensions.** Constraints (Constrain tab, purple
+markers) *control* geometry: the solver moves objects to satisfy them. Dimensions
+(Annotate tab) are *reference* (driven) dimensions: they only measure. The UI labels both.
+
+**Constraint solver.** Unknowns are line endpoints and circle centres/radii of constrained
+objects. A weighted minimum-change Levenberg–Marquardt step satisfies all active
+constraints while moving geometry as little as possible; objects the user just edited are
+preferred to stay put, circle radii are held exactly unless only a size change can work,
+objects on locked/hidden layers never move, and results that collapse a line or circle are
+rejected. If constraints cannot be met the geometry is left unchanged and the unmet
+constraints are shown in red. Status is always computed from the actual geometry.
+
+**Store guards.** Every commit passes through the editor store, which (1) refuses any
+change to objects on a locked layer, (2) places new objects on the active layer (refused if
+it is locked or hidden) and (3) re-applies driving constraints after geometry edits — in
+one undo step.
+
 ### Drawing objects (all in world mm)
 
 | Kind | Stored geometry |
@@ -155,28 +188,45 @@ Each object also has a style: stroke colour and line weight in **paper** mm
 ### Project folder structure
 
 ```
-electron/            main.ts (window, dialogs, IPC), preload.ts (contextBridge API)
+electron/            main.ts (window, dialogs, IPC), preload.ts (contextBridge API), atomicWrite.ts
 scripts/             dev.mjs (Vite + Electron dev runner), build-electron.mjs, electron-build.mjs
 src/
   geometry/          vec, angles, bounds, page (A3), scale, viewport, coords, intersect
   model/             types, shapes, operations, handles, hitTest, document,
-                     anchors, snap, dimensions, modify
-  storage/           documentStorage (serialise/validate), fileService (IPC adapter)
+                     anchors, snap, dimensions, modify, layers, constraints
+  storage/           documentStorage (schema, migration, validation), exportSvg, fileService (IPC adapter)
   render/            ShapeView, PageView, GridView, Rulers, SelectionOverlay, rulerTicks
   ui/                App, FileMenu, Ribbon, PropertiesPanel, DrawingCanvas, StatusBar, controls
   ui/state/          editorReducer (store + undo/redo)
   ui/interaction/    toolSession (click-driven modify/dimension tools)
   main.tsx           renderer entry
-tests/               Vitest unit tests (no UI, no DOM)
-tests-e2e/           Playwright scripts that drive the real Electron window (M1, M2)
+tests/               Vitest unit tests (no UI, no DOM); tests/fixtures: real M1 (v1) and M2 (v2) files
+tests-e2e/           Playwright scripts that drive the real Electron window (M1, M2, M3)
 docs/screenshots/    screenshots captured by the end-to-end run
 ```
 
 ### File format
 
-`*.a3d` — UTF-8 JSON: `{ format: "a3-precision-drawing", formatVersion: 2, units: "mm", page, scale, shapes, dimensions }`.
-Version 2 (Milestone 2) only *adds* `dimensions`; Milestone 1 (version 1) files still open.
-Loading validates every field and rejects malformed files with a clear message.
+`*.a3d` — UTF-8 JSON, format version 3:
+
+```
+{ format: "a3-precision-drawing", formatVersion: 3, units: "mm",
+  page: { widthMm, heightMm, orientation }, scale: { paper, real },
+  layers: [{ id, name, visible, locked, color }],
+  shapes: [... each with layerId], dimensions: [... each with layerId], constraints: [...],
+  settings: { activeLayerId, display: { showGrid, gridSpacingMm, gridSnap, gridSnapStepMm, objectSnap, osnap } } }
+```
+
+* **Migration:** v1 (M1) and v2 (M2) files open and are migrated in memory (default layer,
+  no constraints, default display settings); the user is told, and saving over an older
+  file asks before upgrading it. Files from a newer version are refused.
+* **Validation:** every field is checked; errors name the exact path (e.g.
+  `shapes[2].radius: must be ≥ 0`). Repairable issues (object on an unknown layer, missing
+  display setting, constraint referring to a missing object) are repaired **and listed**.
+* **Saving:** atomic (temporary file, flush, rename) — a failed save never damages the
+  existing file. An unchanged project saves byte-for-byte identically (canonical key order).
+* **Unsaved changes:** "Unsaved changes" badge in the title bar; New/Open ask Save /
+  Don't save / Cancel; closing the window asks too. There is no autosave yet.
 
 ### Technical risks identified (and mitigations)
 

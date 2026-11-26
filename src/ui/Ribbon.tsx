@@ -3,12 +3,15 @@ import { ZOOM_PRESETS } from '../geometry/viewport';
 import { OBJECT_SNAP_KINDS, SNAP_LABELS } from '../model/snap';
 import { LINE_WEIGHTS, type ArrowheadStyle } from '../model/types';
 import { NumberField } from './NumberField';
+import { CONSTRAINT_GLYPHS, constraintFromSelection } from '../model/constraints';
+import { getShapes } from '../model/document';
+import { CONSTRAINT_LABELS, type ConstraintKind } from '../model/types';
 import { Icon } from './Icon';
 import { PEN_COLOURS } from './PropertiesPanel';
 import { ScaleSelector } from './ScaleSelector';
 import type { EditorAction, EditorState, ToolId } from './state/editorReducer';
 
-export type RibbonTab = 'home' | 'draw' | 'annotate' | 'view';
+export type RibbonTab = 'home' | 'draw' | 'annotate' | 'constrain' | 'view';
 
 export interface ViewCommands {
   zoomIn(): void;
@@ -56,14 +59,25 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function Big({ icon, label, onClick, active, disabled, testId, title }: { icon: string; label: string; onClick: () => void; active?: boolean; disabled?: boolean; testId?: string; title?: string }) {
+function Big({ icon, glyph, label, onClick, active, disabled, testId, title }: { icon: string; glyph?: string; label: string; onClick: () => void; active?: boolean; disabled?: boolean; testId?: string; title?: string }) {
   return (
     <button className={`ribbon-btn${active ? ' active' : ''}`} onClick={onClick} disabled={disabled} data-testid={testId} title={title ?? label} aria-pressed={active} data-active={active ? 'true' : undefined}>
-      <Icon name={icon} size={22} />
+      {glyph ? <span className="ribbon-glyph">{glyph}</span> : <Icon name={icon} size={22} />}
       <span>{label}</span>
     </button>
   );
 }
+
+const SELECTION_CONSTRAINTS: { kind: ConstraintKind; tip: string }[] = [
+  { kind: 'horizontal', tip: 'Make the selected line horizontal' },
+  { kind: 'vertical', tip: 'Make the selected line vertical' },
+  { kind: 'parallel', tip: 'Make the two selected lines parallel' },
+  { kind: 'perpendicular', tip: 'Make the two selected lines perpendicular' },
+  { kind: 'tangent', tip: 'Make the selected line and circle (or two circles) tangent' },
+  { kind: 'equal-length', tip: 'Make the two selected lines equal in length' },
+  { kind: 'fixed-length', tip: 'Fix the selected line at its current length (editable in Properties)' },
+  { kind: 'fixed-angle', tip: 'Fix the selected line at its current angle (editable in Properties)' },
+];
 
 interface Props {
   tab: RibbonTab;
@@ -72,9 +86,10 @@ interface Props {
   zoom: number;
   view: ViewCommands;
   edit: EditCommands;
+  constrain: (kind: ConstraintKind) => void;
 }
 
-export function Ribbon({ tab, state, dispatch, zoom, view, edit }: Props) {
+export function Ribbon({ tab, state, dispatch, zoom, view, edit, constrain }: Props) {
   const tool = (t: ToolId, icon: string, label: string, key: string, tip = '') => (
     <Big
       icon={icon}
@@ -243,6 +258,42 @@ export function Ribbon({ tab, state, dispatch, zoom, view, edit }: Props) {
             </div>
             <span className="ribbon-note driven-note" title="Dimensions measure geometry and update automatically. They do not drive geometry.">Driven (measured)</span>
           </Group>
+        </>
+      )}
+      {tab === 'constrain' && (
+        <>
+          <Group title="Driving constraints (from selection)">
+            {SELECTION_CONSTRAINTS.map(({ kind, tip }) => {
+              const r = constraintFromSelection(kind, getShapes(state.doc, state.selection), 'probe');
+              const why = typeof r === 'string' ? r : '';
+              return (
+                <Big
+                  key={kind}
+                  icon=""
+                  glyph={CONSTRAINT_GLYPHS[kind]}
+                  label={CONSTRAINT_LABELS[kind]}
+                  onClick={() => constrain(kind)}
+                  disabled={!!why}
+                  testId={`con-${kind}`}
+                  title={`${CONSTRAINT_LABELS[kind]} – ${tip}${why ? ` (${why})` : ''}`}
+                />
+              );
+            })}
+          </Group>
+          <Group title="Driving constraints (pick points)">
+            <Big icon="" glyph={CONSTRAINT_GLYPHS.coincident} label="Coincident" active={state.tool === 'con-coincident'} onClick={() => dispatch({ type: 'setTool', tool: 'con-coincident' })} testId="tool-con-coincident" title="Coincident – click two points (line ends/midpoints, circle centres) to join them" />
+            <Big icon="" glyph={CONSTRAINT_GLYPHS['fixed-position']} label="Fix Position" active={state.tool === 'con-fixed-position'} onClick={() => dispatch({ type: 'setTool', tool: 'con-fixed-position' })} testId="tool-con-fixed-position" title="Fixed position – click a line end/midpoint or circle centre to pin it where it is" />
+          </Group>
+          <div className="ribbon-group">
+            <div className="ribbon-group-body">
+              <span className="ribbon-note constraint-note" title="Driving constraints CONTROL geometry. Dimensions (Annotate tab) are reference dimensions: they only report measurements.">
+                Constraints control geometry.
+                <br />
+                Lines and circles only.
+              </span>
+            </div>
+            <div className="ribbon-group-title">About</div>
+          </div>
         </>
       )}
       {tab === 'view' && (

@@ -13,9 +13,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
-    "e2e": "node tests-e2e/electron-smoke.mjs && node tests-e2e/milestone2.mjs",
+    "e2e": "node tests-e2e/electron-smoke.mjs && node tests-e2e/milestone2.mjs && node tests-e2e/milestone3.mjs",
     "e2e:m1": "node tests-e2e/electron-smoke.mjs",
-    "e2e:m2": "node tests-e2e/milestone2.mjs"
+    "e2e:m2": "node tests-e2e/milestone2.mjs",
+    "e2e:m3": "node tests-e2e/milestone3.mjs"
   },
   "license": "UNLICENSED",
   "dependencies": {

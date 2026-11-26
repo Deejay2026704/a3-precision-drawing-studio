@@ -19,7 +19,9 @@ import { distanceToShape, hitTest, shapesInsideBounds } from '../model/hitTest';
 import { moveShape } from '../model/operations';
 import { createCircle, createLine, createPolyline, createRectFromCorners, lineAngle, lineLength } from '../model/shapes';
 import { findSnap, type SnapResult, type SnapSettings } from '../model/snap';
-import type { Dimension, Shape, ShapeId } from '../model/types';
+import { editableDimensions, editableShapes, isEditable, isVisible, resolveStroke, visibleDimensions, visibleShapes } from '../model/layers';
+import { CONSTRAINT_GLYPHS, constraintMarkerAnchors, constraintShapeIds, constraintStatus, type ConstraintStatus } from '../model/constraints';
+import type { Constraint, Dimension, Shape, ShapeId } from '../model/types';
 import { DimensionLayoutView, DimensionView } from '../render/DimensionView';
 import { PageView } from '../render/PageView';
 import { HorizontalRuler, RULER_SIZE, VerticalRuler } from '../render/Rulers';
@@ -114,6 +116,12 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
   const singleDim = selectedShapes.length === 0 && selectedDims.length === 1 ? selectedDims[0] : null;
   const singleDimLayout = singleDim ? layoutDimension(doc, singleDim, doc.scale) : null;
   const snapSettings: SnapSettings = useMemo(() => snapSettingsOf(view), [view]);
+  // Layer filtering: what is drawn/snapped (visible) and what can be picked/edited (visible + unlocked).
+  const shown = useMemo(() => visibleShapes(doc), [doc]);
+  const shownDims = useMemo(() => visibleDimensions(doc), [doc]);
+  const pickable = useMemo(() => editableShapes(doc), [doc]);
+  const pickableDoc = useMemo(() => ({ ...doc, dimensions: editableDimensions(doc) }), [doc]);
+  const markers = useMemo(() => layoutConstraintMarkers(doc, transform), [doc, transform]);
   const aperture = screenLengthToWorld(SNAP_APERTURE_PX, transform);
 
   const setFeedback = (t: string | null) => {
@@ -209,7 +217,7 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
   };
 
   const snapAt = (raw: Vec2, opts: { base?: Vec2 | null; exclude?: ReadonlySet<ShapeId> } = {}): SnapResult | null =>
-    findSnap(raw, snapSettings, { shapes: doc.shapes, tolerance: aperture, basePoint: opts.base ?? null, excludeIds: opts.exclude });
+    findSnap(raw, snapSettings, { shapes: shown, tolerance: aperture, basePoint: opts.base ?? null, excludeIds: opts.exclude });
 
   const findHandle = (sp: Vec2): HandleId | null => {
     if (!frame || tool !== 'select') return null;
@@ -238,8 +246,8 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
    */
   const pickAt = (wp: Vec2): { hit: Shape | Dimension | null; hitDim: Dimension | null } => {
     const tol = screenLengthToWorld(HIT_TOLERANCE_PX, transform);
-    const shape = hitTest(doc.shapes, wp, tol);
-    const dim = hitTestDimensions(doc, wp, tol);
+    const shape = hitTest(pickable, wp, tol);
+    const dim = hitTestDimensions(pickableDoc, wp, tol);
     if (!dim) return { hit: shape, hitDim: null };
     if (!shape) return { hit: dim, hitDim: dim };
     const lay = layoutDimension(doc, dim, doc.scale);
@@ -297,6 +305,8 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
     offsetDistanceMm: state.offsetDistanceMm,
     mirrorKeepSource: state.mirrorKeepSource,
     newId,
+    canEdit: (sh) => isEditable(doc, sh),
+    canSee: (sh) => isVisible(doc, sh),
   });
 
   /** Base point for perpendicular / tangent snaps in the current context. */
@@ -345,6 +355,12 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
         dragRef.current = { kind: 'handle', handle, frame, startWorld: wp, originals: selectedShapes, base };
         return;
       }
+      const mk = markers.find((m) => sp.x >= m.x && sp.x <= m.x + m.w && sp.y >= m.y && sp.y <= m.y + m.h);
+      if (mk) {
+        if (e.shiftKey || e.ctrlKey || e.metaKey) dispatch({ type: 'toggleSelection', id: mk.id });
+        else dispatch({ type: 'setSelection', ids: [mk.id] });
+        return;
+      }
       const dg = findDimGrip(sp);
       if (dg && singleDim) {
         dispatch({ type: 'beginEdit' });
@@ -391,7 +407,7 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
 
     if (session) {
       if (session.tool === 'mirror' && (e.shiftKey || e.ctrlKey)) {
-        const s = hitTest(doc.shapes, wp, screenLengthToWorld(HIT_TOLERANCE_PX, transform));
+        const s = hitTest(pickable, wp, screenLengthToWorld(HIT_TOLERANCE_PX, transform));
         if (s) dispatch({ type: 'toggleSelection', id: s.id });
         return;
       }
@@ -435,8 +451,9 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
     if (!d) {
       if (tool === 'select') {
         const h = findHandle(sp) ?? findDimGrip(sp);
-        const over = !h && pickAt(wp).hit;
-        setHoverCursor(h === 'rotate' ? 'grab' : h ? 'crosshair' : over ? 'move' : 'default');
+        const overMarker = markers.some((m) => sp.x >= m.x && sp.x <= m.x + m.w && sp.y >= m.y && sp.y <= m.y + m.h);
+        const over = !h && (overMarker || pickAt(wp).hit);
+        setHoverCursor(h === 'rotate' ? 'grab' : h ? 'crosshair' : overMarker ? 'pointer' : over ? 'move' : 'default');
       } else if (session) {
         setFeedback(toolPreview(session, toolInput(wp, snap)).feedback);
       }
@@ -532,7 +549,7 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
         setMarquee(null);
         if (distance(sp, d.startScreen) < DRAG_THRESHOLD_PX) break;
         const win = boundsFromCorners(screenToWorld(d.startScreen, transform), screenToWorld(sp, transform));
-        const inside = shapesInsideBounds(doc.shapes, win);
+        const inside = shapesInsideBounds(pickable, win);
         dispatch({ type: 'setSelection', ids: d.additive ? [...new Set([...selection, ...inside])] : inside });
         break;
       }
@@ -559,7 +576,8 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
   const selectedSet = new Set(selection);
 
   return (
-    <div className="workspace" style={{ gridTemplateColumns: `${RULER_SIZE}px 1fr`, gridTemplateRows: `${RULER_SIZE}px 1fr` }}>
+    // minmax(0, 1fr): the rulers (sized from the canvas) must never stop the workspace from shrinking.
+    <div className="workspace" style={{ gridTemplateColumns: `${RULER_SIZE}px minmax(0, 1fr)`, gridTemplateRows: `${RULER_SIZE}px minmax(0, 1fr)` }}>
       <div className="ruler-corner" title="Units: millimetres (drawing units)">mm</div>
       <HorizontalRuler transform={transform} width={size.width} cursorX={cursorScreen?.x ?? null} />
       <VerticalRuler transform={transform} height={size.height} cursorY={cursorScreen?.y ?? null} />
@@ -586,13 +604,30 @@ export function DrawingCanvas({ state, dispatch, viewport, setViewport, onResize
         >
           <PageView page={doc.page} transform={transform} showGrid={view.showGrid} gridSpacingMm={view.gridSpacingMm} />
           <g data-testid="shapes">
-            {doc.shapes.map((s) => (
-              <ShapeView key={s.id} shape={s} transform={transform} stroke={selectedSet.has(s.id) && tool !== 'select' ? '#1a73e8' : undefined} />
+            {shown.map((s) => (
+              <ShapeView key={s.id} shape={s} transform={transform} stroke={selectedSet.has(s.id) && tool !== 'select' ? '#1a73e8' : resolveStroke(doc, s)} />
             ))}
           </g>
           <g data-testid="dimensions">
-            {doc.dimensions.map((dm) => (
+            {shownDims.map((dm) => (
               <DimensionView key={dm.id} dim={dm} doc={doc} transform={transform} highlight={selectedSet.has(dm.id) ? '#1a73e8' : undefined} />
+            ))}
+          </g>
+          <g data-testid="constraint-markers">
+            {markers.map((m, i) => (
+              <g
+                key={`${m.id}-${i}`}
+                className={`cmark cmark-${m.status}${selectedSet.has(m.id) ? ' selected' : ''}`}
+                data-constraint-id={m.id}
+                data-constraint-kind={m.kind}
+                data-status={m.status}
+              >
+                <title>{m.title}</title>
+                <rect x={m.x} y={m.y} width={m.w} height={m.h} rx={3} />
+                <text x={m.x + m.w / 2} y={m.y + m.h / 2 + 4}>
+                  {m.label}
+                </text>
+              </g>
             ))}
           </g>
           {draft && <ShapeView shape={draft} transform={transform} stroke="#1a73e8" />}
@@ -655,4 +690,46 @@ export function describeCreated(s: Shape): string {
     case 'polyline':
       return `Freehand polyline created – ${s.points.length} points`;
   }
+}
+
+interface Marker {
+  id: ShapeId;
+  kind: Constraint['kind'];
+  status: ConstraintStatus;
+  label: string;
+  title: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+const STATUS_TEXT: Record<ConstraintStatus, string> = {
+  satisfied: 'satisfied',
+  unsatisfied: 'NOT satisfied (conflict or edited geometry)',
+  suppressed: 'suppressed (ignored)',
+  broken: 'broken – refers to missing or unsupported geometry',
+};
+
+/** Screen-space marker boxes for constraints on visible geometry (stacked when they share an anchor). */
+function layoutConstraintMarkers(doc: import('../model/types').DrawingDocument, t: ViewTransform): Marker[] {
+  const out: Marker[] = [];
+  const used = new Map<string, number>();
+  for (const c of doc.constraints) {
+    const refs = constraintShapeIds(c).map((id) => doc.shapes.find((x) => x.id === id));
+    if (refs.some((r) => r && !isVisible(doc, r))) continue;
+    const status = constraintStatus(doc, c);
+    const value = c.kind === 'fixed-length' ? ` ${formatNumber(c.value, 2)}` : c.kind === 'fixed-angle' ? ` ${formatNumber(c.value, 2)}°` : '';
+    const label = `${CONSTRAINT_GLYPHS[c.kind]}${value}${status === 'unsatisfied' || status === 'broken' ? ' !' : ''}`;
+    const w = Math.max(18, label.length * 7 + 8);
+    const h = 16;
+    for (const a of constraintMarkerAnchors(doc, c)) {
+      const p = worldToScreen(a, t);
+      const key = `${Math.round(p.x / 4)},${Math.round(p.y / 4)}`;
+      const dx = used.get(key) ?? 0;
+      used.set(key, dx + w + 3);
+      out.push({ id: c.id, kind: c.kind, status, label, title: `Driving constraint: ${c.kind} – ${STATUS_TEXT[status]}`, x: p.x + 8 + dx, y: p.y - 22, w, h });
+    }
+  }
+  return out;
 }

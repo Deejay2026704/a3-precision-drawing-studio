@@ -6,6 +6,7 @@ import { vec } from '../geometry/vec';
 import { getDimensions, getShapes, selectionBounds } from '../model/document';
 import { CreateByNumbers } from './CreateByNumbers';
 import { DimensionProperties, DimensionStyleFields } from './DimensionProperties';
+import { ConstraintProperties, LayerAssign } from './ConstraintProperties';
 import {
   moveBoundsTo,
   moveShape,
@@ -23,6 +24,7 @@ import { NumberField } from './NumberField';
 import type { EditorAction, EditorState } from './state/editorReducer';
 
 export const PEN_COLOURS: { value: string; label: string }[] = [
+  { value: 'bylayer', label: 'By layer' },
   { value: '#000000', label: 'Black' },
   { value: '#5f6368', label: 'Grey' },
   { value: '#c5221f', label: 'Red' },
@@ -36,6 +38,7 @@ export function PropertiesPanel({ state, dispatch, newId }: { state: EditorState
   const { doc, selection, tool } = state;
   const shapes = getShapes(doc, selection);
   const dims = getDimensions(doc, selection);
+  const cons = doc.constraints.filter((c) => selection.includes(c.id));
   const update = (s: Shape[], message: string) => dispatch({ type: 'updateShapes', shapes: s, message });
 
   return (
@@ -44,7 +47,15 @@ export function PropertiesPanel({ state, dispatch, newId }: { state: EditorState
       {(tool === 'line' || tool === 'rect' || tool === 'circle') && (
         <CreateByNumbers key={tool} tool={tool} style={state.drawStyle} dispatch={dispatch} newId={newId} />
       )}
-      {shapes.length === 0 && dims.length === 0 && <DocumentProperties state={state} />}
+      {shapes.length === 0 && dims.length === 0 && cons.length === 0 && <DocumentProperties state={state} />}
+      {cons.length === 1 && shapes.length === 0 && dims.length === 0 && <ConstraintProperties c={cons[0]} doc={doc} dispatch={dispatch} />}
+      {cons.length > 1 && shapes.length === 0 && dims.length === 0 && (
+        <section className="panel-section" data-testid="props-multi-constraint">
+          <h3>{cons.length} constraints selected</h3>
+          <p className="hint">Press Delete to remove them. The geometry stays where it is.</p>
+        </section>
+      )}
+      {(shapes.length > 0 || dims.length > 0) && <LayerAssign items={[...shapes, ...dims]} doc={doc} dispatch={dispatch} />}
       {shapes.length === 0 && dims.length === 1 && <DimensionProperties dim={dims[0]} doc={doc} dispatch={dispatch} />}
       {shapes.length === 0 && dims.length > 1 && (
         <>

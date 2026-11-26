@@ -1,0 +1,13 @@
+{
+  "format": "a3-precision-drawing",
+  "formatVersion": 1,
+  "units": "mm",
+  "page": { "widthMm": 420, "heightMm": 297 },
+  "scale": { "paper": 1, "real": 20 },
+  "shapes": [
+    { "id": "shp-a-1", "kind": "line", "start": { "x": 50, "y": 50 }, "end": { "x": 170, "y": 50 }, "style": { "stroke": "#000000", "strokeWidthMm": 0.35 } },
+    { "id": "shp-a-2", "kind": "rect", "origin": { "x": 220, "y": 115 }, "width": 100, "height": 50, "rotationDeg": 0, "style": { "stroke": "#c5221f", "strokeWidthMm": 0.5 } },
+    { "id": "shp-a-3", "kind": "circle", "center": { "x": 100, "y": 200 }, "radius": 30, "style": { "stroke": "#000000", "strokeWidthMm": 0.35 } },
+    { "id": "shp-a-4", "kind": "polyline", "points": [{ "x": 300, "y": 220 }, { "x": 310, "y": 230 }, { "x": 320, "y": 215 }], "style": { "stroke": "#1a73e8", "strokeWidthMm": 0.25 } }
+  ]
+}
