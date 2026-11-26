@@ -1,5 +1,25 @@
 # Development Status
 
+## Milestone 7 — Installable Windows and Mac builds (26 Nov 2026)
+
+No app changes (version 0.6.0). CI now publishes **one download per installer**
+(`INSTALL-Windows-x64 (most PCs)`, `INSTALL-Windows-ARM64`,
+`INSTALL-macOS-Apple-Silicon (M1-M4)`, `INSTALL-macOS-Intel`) and `INSTALL.md` explains, for
+non-developers, which file to pick and how to get past the unsigned-app warnings.
+By your choice, nothing is published as a GitHub Release; installers come from the CI run.
+
+GitHub's Apple Silicon (arm64) Mac runners were unavailable three times in a row
+("capacity constraints"), so the Mac job now runs on an **Intel** Mac runner, which builds
+both Mac installers. CI run
+[45794297641](https://github.com/Deejay2026704/a3-precision-drawing-studio/actions/runs/45794297641)
+(commit `42c1116`): all jobs green – Windows x64 installed, smoke 18/18, auto-update 9/9,
+uninstalled; macOS Intel build installed from the DMG, `codesign` valid, smoke 18/18,
+update check 7/7. **The Apple Silicon DMG from this run was built but not installed on an
+Apple Silicon machine** (earlier runs, e.g. 45784398087, installed and tested the arm64
+build on Apple Silicon).
+
+---
+
 ## Milestone 6 — Polylines, fill/hatch, text, fillets with curves, Letter printing (26 Nov 2026)
 
 Built on Milestone 5 without removing or redesigning anything. Project format **5**
