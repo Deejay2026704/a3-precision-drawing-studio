@@ -18,6 +18,17 @@ update check 7/7. **The Apple Silicon DMG from this run was built but not instal
 Apple Silicon machine** (earlier runs, e.g. 45784398087, installed and tested the arm64
 build on Apple Silicon).
 
+**Portable Windows build** (no installer): CI now also makes
+`A3-Precision-Drawing-Studio-Portable-<version>-x64.zip` / `-arm64.zip` – the unpacked app
+plus `portable-mode.txt`. With that marker file next to the program, all app data (settings,
+autosave/recovery copies, logs) goes to a `data` folder beside it and nothing is written to
+the user profile; updates are notify-only. CI run
+[45915262581](https://github.com/Deejay2026704/a3-precision-drawing-studio/actions/runs/45915262581)
+(commit `cc01d8f`), all jobs green: the x64 portable zip was unzipped on Windows and passed
+`tests-e2e/portable-check.mjs` (5/5: data beside the program, autosave, logs, notify-only
+updates) and the packaged smoke test (18/18); installers as before (Windows smoke 18/18,
+auto-update 9/9; macOS Intel smoke 18/18, update check 7/7).
+
 ---
 
 ## Milestone 6 — Polylines, fill/hatch, text, fillets with curves, Letter printing (26 Nov 2026)
