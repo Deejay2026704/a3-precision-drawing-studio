@@ -19,10 +19,13 @@ export interface UpdateEnv {
   macSigned?: boolean;
   /** A3_UPDATE_URL – test/portable override of the update server. */
   feedUrl?: string;
+  /** Portable copy (no installer): it cannot install updates, so it only tells you about them. */
+  portable?: boolean;
 }
 
 export function updateMode(env: UpdateEnv): UpdateMode {
   if (!env.isPackaged) return 'unsupported';
+  if (env.portable) return 'notify';
   if (env.platform === 'win32') return 'install';
   if (env.platform === 'darwin') return env.macSigned ? 'install' : 'notify';
   return 'unsupported';

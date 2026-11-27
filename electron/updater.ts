@@ -20,9 +20,9 @@ function macDeveloperSigned(): boolean {
  * Auto-update through GitHub Releases (electron-updater). Nothing is downloaded or installed
  * without the user's consent; see updatePolicy.ts for the per-platform behaviour.
  */
-export function setupUpdater(getWindow: () => BrowserWindow | null, log: (m: string) => void): void {
+export function setupUpdater(getWindow: () => BrowserWindow | null, log: (m: string) => void, portable = false): void {
   const feedUrl = validFeedUrl(process.env.A3_UPDATE_URL);
-  const env: UpdateEnv = { platform: process.platform, isPackaged: app.isPackaged, macSigned: macDeveloperSigned(), feedUrl: feedUrl ?? undefined };
+  const env: UpdateEnv = { platform: process.platform, isPackaged: app.isPackaged, macSigned: macDeveloperSigned(), feedUrl: feedUrl ?? undefined, portable };
   const mode = updateMode(env);
   let status: UpdateStatus = mode === 'unsupported' ? { state: 'unsupported', mode, message: unsupportedReason(env) } : { state: 'idle', mode };
   let manual = false;

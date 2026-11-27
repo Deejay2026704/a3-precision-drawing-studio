@@ -4,6 +4,7 @@ import path from 'node:path';
 import { writeFileAtomic } from './atomicWrite';
 import { AutosaveStore, DEFAULT_STALE_MS, sessionId } from './autosaveStore';
 import { setupUpdater } from './updater';
+import { portableDataDir } from './portable';
 import { appendFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 
 const APP_TITLE = 'A3 Precision Drawing Studio';
@@ -35,9 +36,15 @@ function log(msg: string): void {
 }
 
 // Tests (and portable setups) can redirect all app data, including autosave, away from the real profile.
+// Otherwise, a portable copy (marker file next to the program) keeps everything beside itself.
+const portableDir = app.isPackaged ? portableDataDir(app.getPath('exe'), existsSync) : null;
 if (process.env.A3_USER_DATA) app.setPath('userData', process.env.A3_USER_DATA);
+else if (portableDir) {
+  mkdirSync(portableDir, { recursive: true });
+  app.setPath('userData', portableDir);
+}
 
-log(`starting – argv: ${JSON.stringify(process.argv.slice(1))}`);
+log(`starting${portableDir ? ' (portable)' : ''} – argv: ${JSON.stringify(process.argv.slice(1))}`);
 const SESSION = sessionId(process.pid, Date.now());
 let autosave: AutosaveStore | null = null;
 const STALE_MS = Number(process.env.A3_HEARTBEAT_STALE_MS) || DEFAULT_STALE_MS; // test hook
@@ -217,7 +224,7 @@ app.whenReady().then(() => {
   beat();
   setInterval(beat, Math.max(1000, Math.min(10_000, STALE_MS / 3))).unref();
   createWindow();
-  setupUpdater(() => mainWindow, log);
+  setupUpdater(() => mainWindow, log, Boolean(portableDir));
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

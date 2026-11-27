@@ -1,0 +1,13 @@
+A3 Precision Drawing Studio - PORTABLE COPY
+
+Because this file is here, the app keeps ALL its data (settings, autosave/recovery
+copies and logs) in the "data" folder next to the program, and writes nothing to the
+computer's user profile. You can run it from a USB stick or external SSD.
+
+To run: double-click "A3 Precision Drawing Studio.exe".
+Your drawings (.a3d) are saved wherever you choose in File > Save As.
+
+Updates: a portable copy tells you when a new version exists but cannot install it.
+Download the new portable zip and replace this folder (keep your "data" folder).
+
+Delete this file to make the app use the normal user profile instead.

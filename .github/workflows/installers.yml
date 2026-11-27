@@ -69,6 +69,40 @@ jobs:
         run: |
           npm install --no-save playwright@${{ env.PLAYWRIGHT_VERSION }}
           node tests-e2e/packaged-smoke.mjs "C:\A3Test\A3 Precision Drawing Studio.exe"
+      - name: Make the PORTABLE zips (no installer – unzip and run, e.g. from a USB/SSD drive)
+        shell: pwsh
+        run: |
+          $ver = (Get-Content package.json | ConvertFrom-Json).version
+          foreach ($a in @(@{ arch = 'x64'; dir = 'win-unpacked' }, @{ arch = 'arm64'; dir = 'win-arm64-unpacked' })) {
+            $src = Join-Path release $a.dir
+            if (!(Test-Path $src)) { throw "missing $src" }
+            $stage = Join-Path $env:RUNNER_TEMP "portable-$($a.arch)/A3 Precision Drawing Studio"
+            New-Item -ItemType Directory -Force -Path $stage | Out-Null
+            Copy-Item -Recurse -Force "$src/*" $stage
+            Copy-Item build/portable-mode.txt $stage
+            $zip = "release/A3-Precision-Drawing-Studio-Portable-$ver-$($a.arch).zip"
+            Compress-Archive -Path $stage -DestinationPath $zip -Force
+            Write-Host "$zip ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB)"
+          }
+      - name: Test the PORTABLE copy (x64) – unzipped, run without installing
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem release -Filter '*-Portable-*-x64.zip' | Select-Object -First 1
+          Expand-Archive -Path $zip.FullName -DestinationPath 'C:\A3Portable' -Force
+          node tests-e2e/portable-check.mjs 'C:\A3Portable\A3 Precision Drawing Studio\A3 Precision Drawing Studio.exe'
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          node tests-e2e/packaged-smoke.mjs 'C:\A3Portable\A3 Precision Drawing Studio\A3 Precision Drawing Studio.exe'
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: INSTALL-Windows-x64-Portable (no installer)
+          path: release/*-Portable-*-x64.zip
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: INSTALL-Windows-ARM64-Portable (no installer)
+          path: release/*-Portable-*-arm64.zip
+          compression-level: 0
       - name: Build a NEWER version (99.0.0) for the auto-update test
         shell: bash # PowerShell mangles the -c.extraMetadata.version=… argument
         run: |

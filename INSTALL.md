@@ -14,6 +14,7 @@ steps below get past it safely.
 | --- | --- |
 | Windows 10 / 11 (almost all PCs) | **INSTALL-Windows-x64 (most PCs)** |
 | Windows on ARM (e.g. Surface Pro X, Snapdragon laptops) | INSTALL-Windows-ARM64 |
+| Windows **without installing** (portable – e.g. run from a USB/SSD drive) | INSTALL-Windows-x64-Portable (no installer) — or the ARM64 one |
 | Mac with Apple M1, M2, M3 or M4 chip ( ▸ About This Mac shows "Chip: Apple …") | **INSTALL-macOS-Apple-Silicon (M1-M4)** |
 | Older Mac with an Intel processor | INSTALL-macOS-Intel |
 
@@ -31,6 +32,23 @@ Artifacts are kept for 90 days after each build.
 
 Uninstall: Settings ▸ Apps ▸ A3 Precision Drawing Studio ▸ Uninstall. Your drawings and
 recovery files are kept.
+
+## 2b. Portable Windows copy (no installer)
+
+1. Unzip the download, then unzip `A3-Precision-Drawing-Studio-Portable-<version>-x64.zip`
+   to wherever you want to keep it – e.g. your USB stick or external SSD. You get a folder
+   **A3 Precision Drawing Studio**.
+2. Double-click **A3 Precision Drawing Studio.exe** in that folder. If SmartScreen appears:
+   **More info ▸ Run anyway**.
+3. Everything the app stores (settings, autosave/recovery copies, logs) goes into a
+   **data** folder inside that folder – nothing is written to the PC's user profile. This is
+   controlled by the file `portable-mode.txt` in the folder.
+4. A portable copy tells you about new versions but does not install them: download the new
+   portable zip and replace the folder (keep your `data` folder).
+
+**At work:** a portable copy needs no administrator rights, but your organisation's rules
+on running software still apply – check with your IT team first. Managed PCs often block
+programs that are not code-signed (this one is not yet), wherever they are stored.
 
 ## 3. Install on macOS (11 Big Sur or later)
 
